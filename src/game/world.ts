@@ -1,10 +1,13 @@
 export const TILE_SIZE = 32;
 export const CHUNK_SIZE = 24;
 export const REGION_CHUNK_SIZE = 16;
-export const GENERATOR_VERSION = 1;
-export type Terrain = 'grass' | 'meadow' | 'water' | 'mountain' | 'path';
+export const GENERATOR_VERSION = 2;
+import { fieldsAt } from './fields';
+import { hydrologyAt, type Hydrology } from './hydrology';
+export type Terrain = 'deep-water' | 'shallow-water' | 'shore' | 'plain' | 'hill' | 'mountain' | 'river' | 'starter-ground';
+export type Biome = 'ocean' | 'lake' | 'coast' | 'grassland' | 'forest' | 'swamp' | 'desert' | 'tundra' | 'alpine';
 export type Landmark = 'tree' | 'ruin' | 'shrine' | null;
-export interface Tile { x: number; y: number; terrain: Terrain; landmark: Landmark; walkable: boolean; }
+export interface Tile { x: number; y: number; terrain: Terrain; biome: Biome; hydrology: Hydrology; elevation: number; movementCost: number; landmark: Landmark; walkable: boolean; }
 export interface WorldConfig { seed: string; version: number; }
 export interface WorldCoordinate { x: number; y: number; }
 export interface ChunkCoordinate { cx: number; cy: number; }
@@ -16,9 +19,6 @@ export interface WorldChunk extends ChunkCoordinate { tiles: Tile[]; }
 export function createWorldConfig(seed: string, version = GENERATOR_VERSION): WorldConfig { return { seed, version }; }
 
 function hashInput(input: string) { let h = 2166136261; for (let i = 0; i < input.length; i++) { h ^= input.charCodeAt(i); h = Math.imul(h, 16777619); } return (h >>> 0) / 4294967296; }
-
-// This is intentionally retained so generator version 1 reproduces the original world.
-function legacyHash(seed: string, x: number, y: number) { return hashInput(`${seed}:${x}:${y}`); }
 
 function serializeCoordinate(value: string | number) { return typeof value === 'number' && Object.is(value, -0) ? '-0' : String(value); }
 
@@ -52,12 +52,32 @@ export function tileAt(seed: string, x: number, y: number): Tile { return tileAt
 
 export function tileAtConfig(config: WorldConfig, x: number, y: number): Tile {
   if (config.version !== GENERATOR_VERSION) throw new Error(`Unsupported world generator version: ${config.version}`);
-  const broad = (legacyHash(config.seed, Math.floor(x / 5), Math.floor(y / 5)) + legacyHash(config.seed, Math.floor(x / 13) + 77, Math.floor(y / 13) - 31)) / 2;
-  const detail = legacyHash(config.seed, x, y); let terrain: Terrain = broad < 0.24 ? 'water' : broad > 0.83 ? 'mountain' : broad > 0.67 ? 'meadow' : 'grass';
-  if (Math.abs(x) < 2 || Math.abs(y) < 2) terrain = 'path';
-  const walkable = terrain !== 'water' && terrain !== 'mountain';
-  const landmark = walkable && detail > 0.93 ? 'shrine' : walkable && detail > 0.84 ? 'ruin' : walkable && detail > 0.68 ? 'tree' : null;
-  return { x, y, terrain, landmark, walkable };
+  const fields = fieldsAt(config, x, y); const hydrology = hydrologyAt(config, x, y); const starter = Math.hypot(x, y) <= 2;
+  let terrain: Terrain;
+  if (starter) terrain = 'starter-ground';
+  else if (hydrology.waterBody === 'ocean' || hydrology.waterBody === 'lake') terrain = fields.elevation < 0.22 ? 'deep-water' : 'shallow-water';
+  else if (hydrology.waterBody === 'river') terrain = 'river';
+  else if (hydrology.shoreline) terrain = 'shore';
+  else if (fields.elevation > 0.76 || fields.slope > 0.14) terrain = 'mountain';
+  else if (fields.elevation > 0.58 || fields.roughness > 0.65) terrain = 'hill';
+  else terrain = 'plain';
+  const biome = classifyBiome(fields, terrain, hydrology.waterBody);
+  const walkable = terrain !== 'deep-water' && terrain !== 'shallow-water' && terrain !== 'river' && terrain !== 'mountain';
+  const movementCost = terrain === 'starter-ground' || terrain === 'plain' ? 1 : terrain === 'shore' ? 1.5 : biome === 'forest' ? 1.8 : biome === 'swamp' ? 2.5 : biome === 'desert' ? 1.4 : biome === 'tundra' ? 1.8 : terrain === 'hill' ? 2.2 : Infinity;
+  const detail = random(config, 'landmark', x, y); const landmark = walkable && detail > 0.95 ? 'shrine' : walkable && detail > 0.84 ? 'ruin' : walkable && detail > 0.68 ? 'tree' : null;
+  return { x, y, terrain, biome, hydrology, elevation: fields.elevation, movementCost, landmark, walkable };
+}
+
+export function classifyBiome(fields: ReturnType<typeof fieldsAt>, terrain: Terrain, waterBody: Hydrology['waterBody']): Biome {
+  if (waterBody === 'ocean') return 'ocean';
+  if (waterBody === 'lake') return 'lake';
+  if (terrain === 'shore') return 'coast';
+  if (fields.elevation > 0.76 && fields.temperature < 0.45) return 'alpine';
+  if (fields.temperature < 0.28) return 'tundra';
+  if (fields.temperature > 0.7 && fields.moisture < 0.3) return 'desert';
+  if (fields.moisture > 0.72 && fields.elevation < 0.42) return 'swamp';
+  if (fields.moisture > 0.58) return 'forest';
+  return 'grassland';
 }
 
 export function chunkAt(config: WorldConfig, cx: number, cy: number): WorldChunk {
@@ -74,7 +94,7 @@ export function findPath(seed: string, start: Tile, target: Tile): Tile[] {
   while (frontier.length) {
     frontier.sort((a, b) => (cost.get(key(a.x, a.y))! + Math.abs(a.x - target.x) + Math.abs(a.y - target.y)) - (cost.get(key(b.x, b.y))! + Math.abs(b.x - target.x) + Math.abs(b.y - target.y)));
     const current = frontier.shift()!; if (current.x === target.x && current.y === target.y) break;
-    for (const point of neighbors(current)) { const next = tileAt(seed, point.x, point.y); const nextKey = key(next.x, next.y); const nextCost = cost.get(key(current.x, current.y))! + 1; if (next.walkable && (!cost.has(nextKey) || nextCost < cost.get(nextKey)!)) { cost.set(nextKey, nextCost); cameFrom.set(nextKey, key(current.x, current.y)); frontier.push(next); } }
+    for (const point of neighbors(current)) { const next = tileAt(seed, point.x, point.y); const nextKey = key(next.x, next.y); const nextCost = cost.get(key(current.x, current.y))! + next.movementCost; if (next.walkable && (!cost.has(nextKey) || nextCost < cost.get(nextKey)!)) { cost.set(nextKey, nextCost); cameFrom.set(nextKey, key(current.x, current.y)); frontier.push(next); } }
   }
   const result: Tile[] = []; let cursor: string | null = key(target.x, target.y); if (!cameFrom.has(cursor)) return [];
   while (cursor && cursor !== key(start.x, start.y)) { const [x, y] = cursor.split(',').map(Number); result.unshift(tileAt(seed, x, y)); cursor = cameFrom.get(cursor) ?? null; }

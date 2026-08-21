@@ -6,7 +6,7 @@ Implement deterministic, performant generation for biomes, settlements, and orga
 
 - [x] Phase 1 — Deterministic generation foundation
 - [x] Phase 2 — Continuous geographic fields
-- [ ] Phase 3 — Biome and hydrology systems
+- [x] Phase 3 — Biome and hydrology systems
 - [ ] Phase 4 — Region-level feature planning
 - [ ] Phase 5 — Organic settlement sprawl
 - [ ] Phase 6 — Organic road network
@@ -61,16 +61,16 @@ Use `[ ]` for pending, `[-]` for in progress, and `[x]` for completed work. Keep
 
 ## Phase 3 — Biome and hydrology systems
 
-- [ ] Separate physical terrain from ecological biome classification.
-- [ ] Expand terrain concepts to support deep water, shallow water, shore, plains, hills, and mountains as needed.
-- [ ] Add biomes such as ocean, coast, grassland, forest, swamp, desert, tundra, and alpine.
-- [ ] Centralize biome thresholds in a lookup/classification function.
-- [ ] Add local high-frequency detail for clearings, forest density, meadow patches, marsh pockets, and similar variation.
-- [ ] Ensure detail layers cannot destroy required connectivity or settlement suitability.
-- [ ] Derive lakes, coastlines, and shore transitions from elevation and moisture.
-- [ ] Add deterministic rivers from downhill flow or seeded source-to-lowland routing.
-- [ ] Compute slope and movement cost from neighboring elevation values.
-- [ ] Add tests for biome boundaries, water connectivity, river continuity, and chunk-edge consistency.
+- [x] Separate physical terrain from ecological biome classification.
+- [x] Expand terrain concepts to support deep water, shallow water, shore, plains, hills, and mountains as needed.
+- [x] Add biomes such as ocean, coast, grassland, forest, swamp, desert, tundra, and alpine.
+- [x] Centralize biome thresholds in a lookup/classification function.
+- [x] Add local high-frequency detail for clearings, forest density, meadow patches, marsh pockets, and similar variation.
+- [x] Ensure detail layers cannot destroy required connectivity or settlement suitability.
+- [x] Derive lakes, coastlines, and shore transitions from elevation and moisture.
+- [x] Add deterministic rivers from downhill flow or seeded source-to-lowland routing.
+- [x] Compute slope and movement cost from neighboring elevation values.
+- [x] Add tests for biome boundaries, water connectivity, river continuity, and chunk-edge consistency.
 
 ### Phase 3 acceptance criteria
 
