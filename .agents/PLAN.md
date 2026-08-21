@@ -5,7 +5,7 @@ Implement deterministic, performant generation for biomes, settlements, and orga
 ## Progress
 
 - [x] Phase 1 — Deterministic generation foundation
-- [ ] Phase 2 — Continuous geographic fields
+- [x] Phase 2 — Continuous geographic fields
 - [ ] Phase 3 — Biome and hydrology systems
 - [ ] Phase 4 — Region-level feature planning
 - [ ] Phase 5 — Organic settlement sprawl
@@ -44,13 +44,13 @@ Use `[ ]` for pending, `[-]` for in progress, and `[x]` for completed work. Keep
 
 ## Phase 2 — Continuous geographic fields
 
-- [ ] Add deterministic multi-octave noise or an equivalent continuous seeded field implementation.
-- [ ] Generate low-frequency elevation.
-- [ ] Generate moisture using an independent seed namespace and scale.
-- [ ] Generate temperature using noise, latitude, and elevation effects.
-- [ ] Add fertility and roughness/slope fields where useful for settlements and roads.
-- [ ] Keep field generation independent so each field can be tuned without changing unrelated systems.
-- [ ] Add a debug mode or test output for inspecting individual fields.
+- [x] Add deterministic multi-octave noise or an equivalent continuous seeded field implementation.
+- [x] Generate low-frequency elevation.
+- [x] Generate moisture using an independent seed namespace and scale.
+- [x] Generate temperature using noise, latitude, and elevation effects.
+- [x] Add fertility and roughness/slope fields where useful for settlements and roads.
+- [x] Keep field generation independent so each field can be tuned without changing unrelated systems.
+- [x] Add a debug mode or test output for inspecting individual fields.
 
 ### Phase 2 acceptance criteria
 
