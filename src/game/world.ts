@@ -1,16 +1,70 @@
 export const TILE_SIZE = 32;
 export const CHUNK_SIZE = 24;
+export const REGION_CHUNK_SIZE = 16;
+export const GENERATOR_VERSION = 1;
 export type Terrain = 'grass' | 'meadow' | 'water' | 'mountain' | 'path';
 export type Landmark = 'tree' | 'ruin' | 'shrine' | null;
 export interface Tile { x: number; y: number; terrain: Terrain; landmark: Landmark; walkable: boolean; }
-function hash(seed: string, x: number, y: number) { let h = 2166136261; const input = `${seed}:${x}:${y}`; for (let i = 0; i < input.length; i++) { h ^= input.charCodeAt(i); h = Math.imul(h, 16777619); } return (h >>> 0) / 4294967296; }
-export function tileAt(seed: string, x: number, y: number): Tile {
-  const broad = (hash(seed, Math.floor(x / 5), Math.floor(y / 5)) + hash(seed, Math.floor(x / 13) + 77, Math.floor(y / 13) - 31)) / 2;
-  const detail = hash(seed, x, y); let terrain: Terrain = broad < 0.24 ? 'water' : broad > 0.83 ? 'mountain' : broad > 0.67 ? 'meadow' : 'grass';
+export interface WorldConfig { seed: string; version: number; }
+export interface WorldCoordinate { x: number; y: number; }
+export interface ChunkCoordinate { cx: number; cy: number; }
+export interface RegionCoordinate { rx: number; ry: number; }
+export interface ChunkKey extends ChunkCoordinate { seed: string; version: number; }
+export interface RegionKey extends RegionCoordinate { seed: string; version: number; }
+export interface WorldChunk extends ChunkCoordinate { tiles: Tile[]; }
+
+export function createWorldConfig(seed: string, version = GENERATOR_VERSION): WorldConfig { return { seed, version }; }
+
+function hashInput(input: string) { let h = 2166136261; for (let i = 0; i < input.length; i++) { h ^= input.charCodeAt(i); h = Math.imul(h, 16777619); } return (h >>> 0) / 4294967296; }
+
+// This is intentionally retained so generator version 1 reproduces the original world.
+function legacyHash(seed: string, x: number, y: number) { return hashInput(`${seed}:${x}:${y}`); }
+
+function serializeCoordinate(value: string | number) { return typeof value === 'number' && Object.is(value, -0) ? '-0' : String(value); }
+
+/** Returns stable random-access randomness; it does not consume mutable RNG state. */
+export function random(config: WorldConfig, namespace: string, ...coordinates: Array<string | number>) {
+  const input = [config.seed, `v${config.version}`, namespace, ...coordinates.map(serializeCoordinate)].join(':');
+  return hashInput(input);
+}
+
+function assertInteger(value: number, label: string) {
+  if (!Number.isInteger(value)) throw new Error(`${label} must be an integer`);
+}
+
+function floorDiv(value: number, divisor: number) { return Math.floor(value / divisor); }
+
+export function worldToChunk(x: number, y: number): ChunkCoordinate {
+  assertInteger(x, 'x'); assertInteger(y, 'y');
+  return { cx: floorDiv(x, CHUNK_SIZE), cy: floorDiv(y, CHUNK_SIZE) };
+}
+
+export function worldToRegion(x: number, y: number): RegionCoordinate {
+  const chunk = worldToChunk(x, y);
+  return { rx: floorDiv(chunk.cx, REGION_CHUNK_SIZE), ry: floorDiv(chunk.cy, REGION_CHUNK_SIZE) };
+}
+
+export function chunkKey(key: ChunkKey) { return `${key.seed}:v${key.version}:chunk:${key.cx},${key.cy}`; }
+export function regionKey(key: RegionKey) { return `${key.seed}:v${key.version}:region:${key.rx},${key.ry}`; }
+export function featureId(config: WorldConfig, namespace: string, x: number, y: number) { return `${config.seed}:v${config.version}:${namespace}:${x},${y}`; }
+
+export function tileAt(seed: string, x: number, y: number): Tile { return tileAtConfig(createWorldConfig(seed), x, y); }
+
+export function tileAtConfig(config: WorldConfig, x: number, y: number): Tile {
+  if (config.version !== GENERATOR_VERSION) throw new Error(`Unsupported world generator version: ${config.version}`);
+  const broad = (legacyHash(config.seed, Math.floor(x / 5), Math.floor(y / 5)) + legacyHash(config.seed, Math.floor(x / 13) + 77, Math.floor(y / 13) - 31)) / 2;
+  const detail = legacyHash(config.seed, x, y); let terrain: Terrain = broad < 0.24 ? 'water' : broad > 0.83 ? 'mountain' : broad > 0.67 ? 'meadow' : 'grass';
   if (Math.abs(x) < 2 || Math.abs(y) < 2) terrain = 'path';
   const walkable = terrain !== 'water' && terrain !== 'mountain';
   const landmark = walkable && detail > 0.93 ? 'shrine' : walkable && detail > 0.84 ? 'ruin' : walkable && detail > 0.68 ? 'tree' : null;
   return { x, y, terrain, landmark, walkable };
+}
+
+export function chunkAt(config: WorldConfig, cx: number, cy: number): WorldChunk {
+  assertInteger(cx, 'cx'); assertInteger(cy, 'cy');
+  const tiles: Tile[] = [];
+  for (let y = 0; y < CHUNK_SIZE; y++) for (let x = 0; x < CHUNK_SIZE; x++) tiles.push(tileAtConfig(config, cx * CHUNK_SIZE + x, cy * CHUNK_SIZE + y));
+  return { cx, cy, tiles };
 }
 export function key(x: number, y: number) { return `${x},${y}`; }
 export function neighbors(tile: Tile) { return [[1, 0], [-1, 0], [0, 1], [0, -1]].map(([dx, dy]) => ({ x: tile.x + dx, y: tile.y + dy })); }
