@@ -4,6 +4,8 @@ export const TILE_SIZE = 40;
 export const CHUNK_SIZE = 24;
 export const REGION_CHUNK_SIZE = 16;
 export const GENERATOR_VERSION = 3;
+const SHRINE_DETAIL_THRESHOLD = 0.995;
+const RUIN_DETAIL_THRESHOLD = 0.98;
 import { fieldsAt } from './fields';
 import { hydrologyAt, type Hydrology } from './hydrology';
 import type { LandmarkAnchor, ResourceAnchor, RoadEndpoint, SettlementShell } from './regions';
@@ -78,7 +80,7 @@ export function tileAtConfig(config: WorldConfig, x: number, y: number): Tile {
   const biome = classifyBiome(fields, terrain, hydrology.waterBody);
   const walkable = terrain !== 'deep-water' && terrain !== 'shallow-water' && terrain !== 'river' && terrain !== 'mountain';
   const movementCost = terrain === 'starter-ground' || terrain === 'plain' ? 1 : terrain === 'shore' ? 1.5 : biome === 'forest' ? 1.8 : biome === 'swamp' ? 2.5 : biome === 'desert' ? 1.4 : biome === 'tundra' ? 1.8 : terrain === 'hill' ? 2.2 : Infinity;
-  const detail = random(config, 'landmark', x, y); const landmark = walkable && detail > 0.95 ? 'shrine' : walkable && detail > 0.84 ? 'ruin' : walkable && detail > 0.68 ? 'tree' : null;
+  const detail = random(config, 'landmark', x, y); const landmark = walkable && detail > SHRINE_DETAIL_THRESHOLD ? 'shrine' : walkable && detail > RUIN_DETAIL_THRESHOLD ? 'ruin' : walkable && detail > 0.68 ? 'tree' : null;
   return { x, y, terrain, biome, hydrology, elevation: fields.elevation, movementCost, landmark, walkable };
 }
 

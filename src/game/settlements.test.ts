@@ -34,7 +34,7 @@ describe('organic settlement layouts', () => {
     const layout = sampleLayout(); const districtIds = new Set(layout.districts.map((district) => district.id));
     expect(layout.buildings.length).toBeGreaterThan(0);
     for (let index = 0; index < layout.buildings.length; index++) {
-      const building = layout.buildings[index]; expect(districtIds.has(building.districtId)).toBe(true);
+      const building = layout.buildings[index]; expect(districtIds.has(building.districtId)).toBe(true); expect(building.width).toBe(1); expect(building.height).toBe(1); expect(building.rotation).toBe(0);
       for (let otherIndex = index + 1; otherIndex < layout.buildings.length; otherIndex++) expect(overlaps(building, layout.buildings[otherIndex])).toBe(false);
     }
   });

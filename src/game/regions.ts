@@ -1,4 +1,5 @@
 import { fieldsAt } from './fields';
+import { hydrologyAt } from './hydrology';
 import type { Direction } from './hydrology';
 import { CHUNK_SIZE, REGION_CHUNK_SIZE, featureId, random, worldToRegion, type RegionCoordinate, type WorldConfig } from './world';
 import type { SettlementLayout } from './settlements';
@@ -25,7 +26,7 @@ interface SettlementCandidate { id: string; x: number; y: number; rx: number; ry
 
 function settlementCandidate(config: WorldConfig, rx: number, ry: number, index: number): SettlementCandidate | null {
   const point = candidatePoint(config, rx, ry, index); const fields = fieldsAt(config, point.x, point.y);
-  if (fields.elevation < 0.28 || fields.elevation > 0.78 || fields.slope > 0.12) return null;
+  if (fields.elevation < 0.28 || fields.elevation > 0.76 || fields.slope > 0.12 || hydrologyAt(config, point.x, point.y).waterBody !== 'none') return null;
   const waterBonus = fields.elevation < 0.4 || fields.moisture > 0.65 ? 0.2 : 0;
   const biomeBonus = fields.moisture > 0.58 ? 0.15 : fields.moisture > 0.4 ? 0.08 : 0;
   const score = fields.fertility * 0.45 + (1 - fields.slope) * 0.25 + waterBonus + biomeBonus + random(config, 'region:settlement-score', rx, ry, index) * 0.08;
