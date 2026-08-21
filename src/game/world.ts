@@ -91,16 +91,24 @@ export function chunkAt(config: WorldConfig, cx: number, cy: number): WorldChunk
 }
 export function key(x: number, y: number) { return `${x},${y}`; }
 export function neighbors(tile: Tile) { return [[1, 0], [-1, 0], [0, 1], [0, -1]].map(([dx, dy]) => ({ x: tile.x + dx, y: tile.y + dy })); }
-export function findPath(seed: string, start: Tile, target: Tile, roadNetwork?: RoadNetwork): Tile[] {
+interface PathEntry { tile: Tile; cost: number; priority: number; }
+class PathHeap {
+  private values: PathEntry[] = [];
+  push(value: PathEntry) { this.values.push(value); let index = this.values.length - 1; while (index > 0) { const parent = Math.floor((index - 1) / 2); if (this.compare(this.values[parent], value) <= 0) break; this.values[index] = this.values[parent]; index = parent; } this.values[index] = value; }
+  pop() { if (!this.values.length) return undefined; const result = this.values[0]; const last = this.values.pop()!; if (this.values.length) { let index = 0; while (true) { const left = index * 2 + 1; if (left >= this.values.length) break; const right = left + 1; const child = right < this.values.length && this.compare(this.values[right], this.values[left]) < 0 ? right : left; if (this.compare(this.values[child], last) >= 0) break; this.values[index] = this.values[child]; index = child; } this.values[index] = last; } return result; }
+  get size() { return this.values.length; }
+  private compare(a: PathEntry, b: PathEntry) { return a.priority - b.priority || a.cost - b.cost || key(a.tile.x, a.tile.y).localeCompare(key(b.tile.x, b.tile.y)); }
+}
+export interface PathOptions { maxExpandedNodes?: number; maxPathLength?: number; }
+export function findPath(seed: string, start: Tile, target: Tile, roadNetwork?: RoadNetwork, options: PathOptions = {}): Tile[] {
   const bridgeTiles = new Set(roadNetwork?.segments.flatMap((segment) => segment.bridges.flatMap((bridge) => bridge.tiles.map((tile) => key(tile.x, tile.y)))) ?? []);
   if (!target.walkable && !bridgeTiles.has(key(target.x, target.y))) return [];
-  const frontier: Tile[] = [start]; const cameFrom = new Map<string, string | null>([[key(start.x, start.y), null]]); const cost = new Map([[key(start.x, start.y), 0]]);
-  while (frontier.length) {
-    frontier.sort((a, b) => (cost.get(key(a.x, a.y))! + Math.abs(a.x - target.x) + Math.abs(a.y - target.y)) - (cost.get(key(b.x, b.y))! + Math.abs(b.x - target.x) + Math.abs(b.y - target.y)));
-    const current = frontier.shift()!; if (current.x === target.x && current.y === target.y) break;
-    for (const point of neighbors(current)) { const next = tileAt(seed, point.x, point.y); const nextKey = key(next.x, next.y); const bridge = bridgeTiles.has(nextKey); const nextCost = cost.get(key(current.x, current.y))! + (bridge ? 1.2 : next.movementCost); if ((next.walkable || bridge) && (!cost.has(nextKey) || nextCost < cost.get(nextKey)!)) { cost.set(nextKey, nextCost); cameFrom.set(nextKey, key(current.x, current.y)); frontier.push(next); } }
+  const frontier = new PathHeap(); const startKey = key(start.x, start.y); const cameFrom = new Map<string, string | null>([[startKey, null]]); const cost = new Map([[startKey, 0]]); frontier.push({ tile: start, cost: 0, priority: Math.abs(start.x - target.x) + Math.abs(start.y - target.y) }); let expanded = 0; const maxExpandedNodes = options.maxExpandedNodes ?? 1200;
+  while (frontier.size && expanded++ < maxExpandedNodes) {
+    const entry = frontier.pop()!; const current = entry.tile; const currentKey = key(current.x, current.y); if (entry.cost !== cost.get(currentKey)) continue; if (current.x === target.x && current.y === target.y) break;
+    for (const point of neighbors(current)) { const next = tileAt(seed, point.x, point.y); const nextKey = key(next.x, next.y); const bridge = bridgeTiles.has(nextKey); const nextCost = entry.cost + (bridge ? 1.2 : next.movementCost); if ((next.walkable || bridge) && (!cost.has(nextKey) || nextCost < cost.get(nextKey)!)) { cost.set(nextKey, nextCost); cameFrom.set(nextKey, currentKey); frontier.push({ tile: next, cost: nextCost, priority: nextCost + Math.abs(next.x - target.x) + Math.abs(next.y - target.y) }); } }
   }
   const result: Tile[] = []; let cursor: string | null = key(target.x, target.y); if (!cameFrom.has(cursor)) return [];
   while (cursor && cursor !== key(start.x, start.y)) { const [x, y] = cursor.split(',').map(Number); result.unshift(tileAt(seed, x, y)); cursor = cameFrom.get(cursor) ?? null; }
-  return result;
+  return options.maxPathLength ? result.slice(0, options.maxPathLength) : result;
 }

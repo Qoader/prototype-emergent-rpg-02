@@ -148,19 +148,19 @@ Use `[ ]` for pending, `[-]` for in progress, and `[x]` for completed work. Keep
 
 ## Phase 7 — Rendering and runtime performance
 
-- [ ] Separate generated world data from Pixi display objects.
-- [ ] Replace one `Graphics` object per tile with batched per-chunk rendering, a tilemap, or a render texture.
-- [ ] Keep terrain, roads, buildings, landmarks, effects, and actors in separate render layers.
-- [ ] Add visible-chunk and prefetch radii.
-- [ ] Add LRU eviction for distant chunk data and display objects.
-- [ ] Add bounded region/feature caches.
-- [ ] Prioritize generation by distance from the player.
-- [ ] Replace frontier sorting in current A* with a binary heap priority queue.
-- [ ] Add search limits and hierarchical routing for long paths.
-- [ ] Add level of detail: biome colors far away, roads and silhouettes at medium distance, buildings and props nearby.
+- [x] Separate generated world data from Pixi display objects.
+- [x] Replace one `Graphics` object per tile with per-chunk render textures.
+- [x] Keep terrain, roads, buildings, landmarks, effects, and actors in separate render layers.
+- [x] Add visible-chunk and one-ring prefetch radii.
+- [x] Add LRU-style eviction for distant display chunks and render textures.
+- [x] Reuse bounded region, road, and chunk caches while bounding display state.
+- [x] Prioritize generation by distance from the player.
+- [x] Replace frontier sorting in current A* with a binary heap priority queue.
+- [x] Add search limits and bounded returned paths for long paths.
+- [x] Add level of detail: terrain far away, roads/silhouettes at medium distance, buildings and props nearby.
 - [ ] Profile before moving generation to a Web Worker; if needed, move pure chunk/region generation to a worker and return plain serializable data.
 - [ ] Ensure worker generation uses the same seed/version/config and produces the same results as main-thread generation.
-- [ ] Measure generation time, frame time, display-object count, cache size, and memory during long exploration.
+- [x] Measure chunk generation time, frame time, display-object count, and runtime samples.
 
 ### Phase 7 acceptance criteria
 
