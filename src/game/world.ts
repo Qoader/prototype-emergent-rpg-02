@@ -1,4 +1,6 @@
-export const TILE_SIZE = 32;
+// A middle-distance view: enough room to navigate a settlement without turning
+// the wilderness into a field of tiny symbols.
+export const TILE_SIZE = 40;
 export const CHUNK_SIZE = 24;
 export const REGION_CHUNK_SIZE = 16;
 export const GENERATOR_VERSION = 2;
