@@ -37,8 +37,23 @@ describe('procedural Emberwild', () => {
   it('rejects unsupported tile generator versions explicitly', () => {
     expect(() => tileAtConfig(createWorldConfig('EMBERWILD-01', GENERATOR_VERSION + 1), 0, 0)).toThrow('Unsupported world generator version');
   });
-  it('finds a walkable route', () => { const path = findPath('EMBERWILD-01', tileAt('EMBERWILD-01', 0, 0), tileAt('EMBERWILD-01', 8, 8)); expect(path.at(-1)?.x).toBe(8); expect(path.at(-1)?.y).toBe(8); });
-  it('rejects blocked destinations', () => { const blocked = { ...tileAt('EMBERWILD-01', 0, 0), walkable: false }; expect(findPath('EMBERWILD-01', tileAt('EMBERWILD-01', 1, 1), blocked)).toEqual([]); });
+  it('finds the geometric diagonal route', () => {
+    const path = findPath('EMBERWILD-01', tileAt('EMBERWILD-01', 0, 0), tileAt('EMBERWILD-01', 3, 3));
+    expect(path).toHaveLength(3);
+    expect(path.at(-1)).toMatchObject({ x: 3, y: 3 });
+    expect(path.every((tile, index) => { const previous = index === 0 ? { x: 0, y: 0 } : path[index - 1]; return Math.abs(tile.x - previous.x) <= 1 && Math.abs(tile.y - previous.y) <= 1; })).toBe(true);
+  });
+  it('keeps paths inside the current and neighboring chunks', () => {
+    const path = findPath('EMBERWILD-01', tileAt('EMBERWILD-01', 0, 0), tileAt('EMBERWILD-01', 100, 100));
+    expect(path.length).toBeGreaterThan(0);
+    expect(path.every((tile) => tile.x >= -CHUNK_SIZE && tile.x < CHUNK_SIZE * 2 && tile.y >= -CHUNK_SIZE && tile.y < CHUNK_SIZE * 2)).toBe(true);
+  });
+  it('stops at the closest reachable tile when the destination is blocked', () => {
+    const blocked = { ...tileAt('EMBERWILD-01', 0, 0), walkable: false };
+    const path = findPath('EMBERWILD-01', tileAt('EMBERWILD-01', 1, 1), blocked);
+    expect(path.length).toBeGreaterThan(0);
+    expect(path.at(-1)).not.toMatchObject({ x: 0, y: 0 });
+  });
 
   it('keeps random-access variation directionally balanced', () => {
     const spatialConfig = createWorldConfig('SPATIAL-TEST');

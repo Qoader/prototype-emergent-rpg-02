@@ -7,6 +7,8 @@ import type { SettlementLayout } from './settlements';
 export const REGION_SIZE_TILES = CHUNK_SIZE * REGION_CHUNK_SIZE;
 const CANDIDATES_PER_REGION = 6;
 const MIN_SETTLEMENT_SPACING = 120;
+const SHRINE_LANDMARK_CHANCE = 0.12;
+const RUIN_LANDMARK_CHANCE = 0.18;
 
 export interface RegionBounds { minX: number; minY: number; maxX: number; maxY: number; }
 export interface SettlementAnchor { id: string; type: 'center' | 'gate' | 'market' | 'well' | 'crossing' | 'harbor' | 'resource'; x: number; y: number; }
@@ -62,7 +64,7 @@ function regionAnchors(config: WorldConfig, region: RegionCoordinate) {
   const bounds = regionBounds(region.rx, region.ry); const landmarks: LandmarkAnchor[] = []; const resources: ResourceAnchor[] = [];
   for (let index = 0; index < 4; index++) {
     const x = bounds.minX + 24 + Math.floor(random(config, 'region:landmark-x', region.rx, region.ry, index) * (REGION_SIZE_TILES - 48)); const y = bounds.minY + 24 + Math.floor(random(config, 'region:landmark-y', region.rx, region.ry, index) * (REGION_SIZE_TILES - 48)); const fields = fieldsAt(config, x, y);
-    if (fields.elevation >= 0.28 && fields.slope < 0.18 && random(config, 'region:landmark-keep', region.rx, region.ry, index) > 0.55) { const types: LandmarkAnchor['type'][] = ['ruin', 'shrine', 'watchtower', 'natural-wonder']; const type = types[Math.floor(random(config, 'region:landmark-type', region.rx, region.ry, index) * types.length)]; landmarks.push({ id: featureId(config, 'landmark', x, y), type, x, y, importance: 0.4 + random(config, 'region:landmark-importance', x, y) * 0.6 }); }
+    if (fields.elevation >= 0.28 && fields.slope < 0.18 && random(config, 'region:landmark-keep', region.rx, region.ry, index) > 0.55) { const typeRoll = random(config, 'region:landmark-type', region.rx, region.ry, index); const type: LandmarkAnchor['type'] = typeRoll < SHRINE_LANDMARK_CHANCE ? 'shrine' : typeRoll < SHRINE_LANDMARK_CHANCE + RUIN_LANDMARK_CHANCE ? 'ruin' : typeRoll < 0.65 ? 'watchtower' : 'natural-wonder'; landmarks.push({ id: featureId(config, 'landmark', x, y), type, x, y, importance: 0.4 + random(config, 'region:landmark-importance', x, y) * 0.6 }); }
   }
   for (let index = 0; index < 4; index++) {
     const x = bounds.minX + 24 + Math.floor(random(config, 'region:resource-x', region.rx, region.ry, index) * (REGION_SIZE_TILES - 48)); const y = bounds.minY + 24 + Math.floor(random(config, 'region:resource-y', region.rx, region.ry, index) * (REGION_SIZE_TILES - 48)); const fields = fieldsAt(config, x, y); const types: ResourceAnchor['type'][] = ['forest', 'fertile-land', 'ore', 'stone', 'salt', 'water'];

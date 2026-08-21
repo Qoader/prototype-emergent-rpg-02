@@ -4,8 +4,9 @@ export const TILE_SIZE = 40;
 export const CHUNK_SIZE = 24;
 export const REGION_CHUNK_SIZE = 16;
 export const GENERATOR_VERSION = 3;
-const SHRINE_DETAIL_THRESHOLD = 0.995;
-const RUIN_DETAIL_THRESHOLD = 0.98;
+// Rare points of interest should stay special even across large explored areas.
+const SHRINE_DETAIL_THRESHOLD = 0.998;
+const RUIN_DETAIL_THRESHOLD = 0.99;
 import { fieldsAt } from './fields';
 import { hydrologyAt, type Hydrology } from './hydrology';
 import type { LandmarkAnchor, ResourceAnchor, RoadEndpoint, SettlementShell } from './regions';
@@ -103,7 +104,9 @@ export function chunkAt(config: WorldConfig, cx: number, cy: number): WorldChunk
   return { cx, cy, tiles, settlements: [], settlementLayouts: [], landmarks: [], resources: [], roadEndpoints: [], roads: [] };
 }
 export function key(x: number, y: number) { return `${x},${y}`; }
-export function neighbors(tile: Tile) { return [[1, 0], [-1, 0], [0, 1], [0, -1]].map(([dx, dy]) => ({ x: tile.x + dx, y: tile.y + dy })); }
+export function neighbors(tile: Tile) {
+  return [[1, 0], [1, 1], [0, 1], [-1, 1], [-1, 0], [-1, -1], [0, -1], [1, -1]].map(([dx, dy]) => ({ x: tile.x + dx, y: tile.y + dy }));
+}
 interface PathEntry { tile: Tile; cost: number; priority: number; }
 class PathHeap {
   private values: PathEntry[] = [];
@@ -115,13 +118,36 @@ class PathHeap {
 export interface PathOptions { maxExpandedNodes?: number; maxPathLength?: number; }
 export function findPath(seed: string, start: Tile, target: Tile, roadNetwork?: RoadNetwork, options: PathOptions = {}): Tile[] {
   const bridgeTiles = new Set(roadNetwork?.segments.flatMap((segment) => segment.bridges.flatMap((bridge) => bridge.tiles.map((tile) => key(tile.x, tile.y)))) ?? []);
-  if (!target.walkable && !bridgeTiles.has(key(target.x, target.y))) return [];
-  const frontier = new PathHeap(); const startKey = key(start.x, start.y); const cameFrom = new Map<string, string | null>([[startKey, null]]); const cost = new Map([[startKey, 0]]); frontier.push({ tile: start, cost: 0, priority: Math.abs(start.x - target.x) + Math.abs(start.y - target.y) }); let expanded = 0; const maxExpandedNodes = options.maxExpandedNodes ?? 1200;
-  while (frontier.size && expanded++ < maxExpandedNodes) {
-    const entry = frontier.pop()!; const current = entry.tile; const currentKey = key(current.x, current.y); if (entry.cost !== cost.get(currentKey)) continue; if (current.x === target.x && current.y === target.y) break;
-    for (const point of neighbors(current)) { const next = tileAt(seed, point.x, point.y); const nextKey = key(next.x, next.y); const bridge = bridgeTiles.has(nextKey); const nextCost = entry.cost + (bridge ? 1.2 : next.movementCost); if ((next.walkable || bridge) && (!cost.has(nextKey) || nextCost < cost.get(nextKey)!)) { cost.set(nextKey, nextCost); cameFrom.set(nextKey, currentKey); frontier.push({ tile: next, cost: nextCost, priority: nextCost + Math.abs(next.x - target.x) + Math.abs(next.y - target.y) }); } }
+  const tileCache = new Map<string, Tile>(); const getTile = (x: number, y: number) => { const tileKey = key(x, y); const cached = tileCache.get(tileKey); if (cached) return cached; const tile = tileAt(seed, x, y); tileCache.set(tileKey, tile); return tile; };
+  const startChunk = worldToChunk(start.x, start.y); const minX = (startChunk.cx - 1) * CHUNK_SIZE; const minY = (startChunk.cy - 1) * CHUNK_SIZE; const maxX = (startChunk.cx + 2) * CHUNK_SIZE - 1; const maxY = (startChunk.cy + 2) * CHUNK_SIZE - 1;
+  const boundedTarget = { x: Math.max(minX, Math.min(maxX, target.x)), y: Math.max(minY, Math.min(maxY, target.y)) };
+  const targetKey = key(boundedTarget.x, boundedTarget.y); const effectiveTarget = target.x === boundedTarget.x && target.y === boundedTarget.y ? target : getTile(boundedTarget.x, boundedTarget.y); const targetBlocked = !effectiveTarget.walkable && !bridgeTiles.has(targetKey);
+  let searchTarget = boundedTarget;
+  if (targetBlocked) {
+    for (let radius = 1; radius <= Math.max(maxX - minX, maxY - minY) && searchTarget === boundedTarget; radius++) {
+      for (let x = boundedTarget.x - radius; x <= boundedTarget.x + radius; x++) for (const y of [boundedTarget.y - radius, boundedTarget.y + radius]) {
+        if (x < minX || x > maxX || y < minY || y > maxY) continue; const candidate = getTile(x, y); if (candidate.walkable || bridgeTiles.has(key(x, y))) { searchTarget = { x, y }; break; }
+      }
+      for (let y = boundedTarget.y - radius + 1; y < boundedTarget.y + radius && searchTarget === boundedTarget; y++) for (const x of [boundedTarget.x - radius, boundedTarget.x + radius]) {
+        if (x < minX || x > maxX || y < minY || y > maxY) continue; const candidate = getTile(x, y); if (candidate.walkable || bridgeTiles.has(key(x, y))) { searchTarget = { x, y }; break; }
+      }
+    }
   }
-  const result: Tile[] = []; let cursor: string | null = key(target.x, target.y); if (!cameFrom.has(cursor)) return [];
-  while (cursor && cursor !== key(start.x, start.y)) { const [x, y] = cursor.split(',').map(Number); result.unshift(tileAt(seed, x, y)); cursor = cameFrom.get(cursor) ?? null; }
+  const searchTargetKey = key(searchTarget.x, searchTarget.y); const frontier = new PathHeap(); const startKey = key(start.x, start.y); const cameFrom = new Map<string, string | null>([[startKey, null]]); const cost = new Map([[startKey, 0]]); const octile = (x: number, y: number) => { const dx = Math.abs(x - searchTarget.x); const dy = Math.abs(y - searchTarget.y); return Math.max(dx, dy) + (Math.SQRT2 - 1) * Math.min(dx, dy); }; frontier.push({ tile: start, cost: 0, priority: octile(start.x, start.y) }); let expanded = 0; const maxExpandedNodes = options.maxExpandedNodes ?? Number.POSITIVE_INFINITY;
+  while (frontier.size && expanded++ < maxExpandedNodes) {
+    const entry = frontier.pop()!; const current = entry.tile; const currentKey = key(current.x, current.y); if (entry.cost !== cost.get(currentKey)) continue; if (currentKey === searchTargetKey) break;
+    for (const point of neighbors(current)) {
+      if (point.x < minX || point.x > maxX || point.y < minY || point.y > maxY) continue;
+      const next = getTile(point.x, point.y); const nextKey = key(next.x, next.y); const bridge = bridgeTiles.has(nextKey); if ((!next.walkable && !bridge) || (nextKey === targetKey && targetBlocked)) continue;
+      const diagonal = point.x !== current.x && point.y !== current.y; const nextCost = entry.cost + (diagonal ? Math.SQRT2 : 1); if (!cost.has(nextKey) || nextCost < cost.get(nextKey)!) { cost.set(nextKey, nextCost); cameFrom.set(nextKey, currentKey); frontier.push({ tile: next, cost: nextCost, priority: nextCost + octile(next.x, next.y) }); }
+    }
+  }
+  let destinationKey = searchTargetKey;
+  if (!cameFrom.has(destinationKey)) {
+    const reachable = [...cameFrom.keys()].filter((candidate) => candidate !== startKey); reachable.sort((a, b) => { const [ax, ay] = a.split(',').map(Number); const [bx, by] = b.split(',').map(Number); const distance = (x: number, y: number) => (x - boundedTarget.x) ** 2 + (y - boundedTarget.y) ** 2; return distance(ax, ay) - distance(bx, by) || (cost.get(a)! - cost.get(b)!) || a.localeCompare(b); });
+    destinationKey = reachable[0] ?? startKey;
+  }
+  const result: Tile[] = []; let cursor: string | null = destinationKey;
+  while (cursor && cursor !== key(start.x, start.y)) { const [x, y] = cursor.split(',').map(Number); result.unshift(getTile(x, y)); cursor = cameFrom.get(cursor) ?? null; }
   return options.maxPathLength ? result.slice(0, options.maxPathLength) : result;
 }
