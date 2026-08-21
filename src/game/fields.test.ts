@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { DEFAULT_FIELD_TUNING, fieldAt, fieldsAt, sampleFieldGrid } from './fields';
+import { sampleValueNoise } from './noise';
 import { createWorldConfig } from './world';
 
 const config = createWorldConfig('EMBERWILD-01');
@@ -10,22 +11,22 @@ describe('continuous geographic fields', () => {
     expect(fieldsAt(config, 11, -8)).not.toEqual(fieldsAt(createWorldConfig('OTHER'), 11, -8));
   });
 
-  it('keeps fixed field fixtures stable for version 2', () => {
+  it('keeps fixed field fixtures stable for version 3', () => {
     expect(fieldsAt(config, 11, -8)).toEqual({
-      elevation: 0.4890245321301452,
-      moisture: 0.6712698482879532,
-      temperature: 0.7326234157039762,
-      fertility: 0.7701800089630074,
-      roughness: 0.402988127471368,
-      slope: 0.007185851829938472,
+      elevation: 0.6705709158138613,
+      moisture: 0.6190582635166334,
+      temperature: 0.5337628723793557,
+      fertility: 0.47699040346892435,
+      roughness: 0.5154756317007549,
+      slope: 0.005280944856755232,
     });
     expect(fieldsAt(config, -241, -385)).toEqual({
-      elevation: 0.33226105589315424,
-      moisture: 0.15192093928835687,
-      temperature: 0.6310477516711586,
-      fertility: 0.3699244904118864,
-      roughness: 0.6258917173324223,
-      slope: 0.007111310114878311,
+      elevation: 0.21363899716755697,
+      moisture: 0.486842493423967,
+      temperature: 0.8023841379680958,
+      fertility: 0.4828890922000655,
+      roughness: 0.20206998885734523,
+      slope: 0.023026690883589523,
     });
   });
 
@@ -43,6 +44,17 @@ describe('continuous geographic fields', () => {
     expect(Math.abs(left.elevation - right.elevation)).toBeLessThan(0.1);
     expect(Math.abs(left.moisture - right.moisture)).toBeLessThan(0.1);
     expect(Math.abs(left.temperature - right.temperature)).toBeLessThan(0.1);
+  });
+
+  it('keeps elevation variation directionally balanced', () => {
+    let horizontal = 0; let vertical = 0;
+    for (let y = -128; y < 128; y++) for (let x = -128; x < 128; x++) {
+      const current = sampleValueNoise(config, 'field:elevation', x, y, DEFAULT_FIELD_TUNING.elevation);
+      horizontal += Math.abs(current - sampleValueNoise(config, 'field:elevation', x + 1, y, DEFAULT_FIELD_TUNING.elevation));
+      vertical += Math.abs(current - sampleValueNoise(config, 'field:elevation', x, y + 1, DEFAULT_FIELD_TUNING.elevation));
+    }
+    const ratio = Math.max(horizontal, vertical) / Math.min(horizontal, vertical);
+    expect(ratio).toBeLessThan(1.15);
   });
 
   it('keeps fields independent when unrelated tuning changes', () => {

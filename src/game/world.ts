@@ -3,7 +3,7 @@
 export const TILE_SIZE = 40;
 export const CHUNK_SIZE = 24;
 export const REGION_CHUNK_SIZE = 16;
-export const GENERATOR_VERSION = 2;
+export const GENERATOR_VERSION = 3;
 import { fieldsAt } from './fields';
 import { hydrologyAt, type Hydrology } from './hydrology';
 import type { LandmarkAnchor, ResourceAnchor, RoadEndpoint, SettlementShell } from './regions';
@@ -23,7 +23,16 @@ export interface WorldChunk extends ChunkCoordinate { tiles: Tile[]; settlements
 
 export function createWorldConfig(seed: string, version = GENERATOR_VERSION): WorldConfig { return { seed, version }; }
 
-function hashInput(input: string) { let h = 2166136261; for (let i = 0; i < input.length; i++) { h ^= input.charCodeAt(i); h = Math.imul(h, 16777619); } return (h >>> 0) / 4294967296; }
+function hashInput(input: string) {
+  let h = 2166136261;
+  for (let i = 0; i < input.length; i++) { h ^= input.charCodeAt(i); h = Math.imul(h, 16777619); }
+  h ^= h >>> 16;
+  h = Math.imul(h, 0x85ebca6b);
+  h ^= h >>> 13;
+  h = Math.imul(h, 0xc2b2ae35);
+  h ^= h >>> 16;
+  return (h >>> 0) / 4294967296;
+}
 
 function serializeCoordinate(value: string | number) { return typeof value === 'number' && Object.is(value, -0) ? '-0' : String(value); }
 
