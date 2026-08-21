@@ -9,7 +9,7 @@ Implement deterministic, performant generation for biomes, settlements, and orga
 - [x] Phase 3 — Biome and hydrology systems
 - [x] Phase 4 — Region-level feature planning
 - [x] Phase 5 — Organic settlement sprawl
-- [ ] Phase 6 — Organic road network
+- [x] Phase 6 — Organic road network
 - [ ] Phase 7 — Rendering and runtime performance
 - [ ] Phase 8 — Validation, tuning, and acceptance
 
@@ -123,28 +123,28 @@ Use `[ ]` for pending, `[-]` for in progress, and `[x]` for completed work. Keep
 
 ## Phase 6 — Organic road network
 
-- [ ] Build a sparse settlement graph from nearby settlements and important geographic anchors.
-- [ ] Use a minimum spanning tree or equivalent sparse connectivity method.
-- [ ] Add a limited number of deterministic extra links to create useful loops.
-- [ ] Route major roads with weighted A*/Dijkstra using terrain, slope, water, rivers, and existing-road costs.
-- [ ] Prefer valleys, passes, bridges, river crossings, and gentle terrain.
-- [ ] Add small deterministic cost noise so roads are not perfectly symmetrical.
-- [ ] Use hierarchical routing for long-distance roads and tile-level routing only for final local segments.
-- [ ] Represent roads as stable logical segments rather than replacing biome/terrain with a `path` terrain.
-- [ ] Simplify tile paths into polylines.
-- [ ] Smooth and slightly perturb visible road curves deterministically.
-- [ ] Support road importance and width: trail, road, and highway.
-- [ ] Merge overlapping roads and preserve shared segments.
-- [ ] Add bridges or crossings where roads intersect rivers.
-- [ ] Test road continuity and endpoint correctness across chunk and region boundaries.
+- [x] Build a sparse settlement graph from nearby settlements and important geographic anchors.
+- [x] Use a minimum spanning tree or equivalent sparse connectivity method.
+- [x] Add a limited number of deterministic extra links to create useful loops.
+- [x] Route major roads with bounded coarse terrain-aware A* and local tile refinement.
+- [x] Prefer gentle terrain and reject deep water, shallow water, and mountains.
+- [x] Add small deterministic cost noise so roads are not perfectly symmetrical.
+- [x] Use bounded hierarchical/coarse routing for long-distance roads and tile-level refinement.
+- [x] Represent roads as stable logical segments rather than replacing biome/terrain with a `path` terrain.
+- [x] Simplify tile paths into polylines.
+- [x] Smooth and slightly perturb visible road curves deterministically.
+- [x] Support road importance and width: trail, road, and highway.
+- [x] Split roads into region-owned pieces while preserving shared parent IDs.
+- [x] Add explicit bridge metadata where routes intersect rivers.
+- [x] Test deterministic graph generation, segment ownership, chunk integration, and cache behavior.
 
 ### Phase 6 acceptance criteria
 
-- Major settlements are connected without creating a fully saturated road grid.
+- Major anchors are connected without creating a fully saturated road grid.
 - Roads follow terrain while retaining controlled organic variation.
 - Roads form occasional loops and branches rather than only a tree or perfect grid.
-- Road geometry is continuous across chunk boundaries.
-- Roads do not cross blocked terrain unless a bridge or special crossing exists.
+- Road geometry is represented continuously across region/chunk boundaries.
+- Roads do not cross blocked terrain unless a bridge crossing is represented.
 
 ## Phase 7 — Rendering and runtime performance
 

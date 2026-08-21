@@ -1,6 +1,7 @@
 import { chunkAt, CHUNK_SIZE, REGION_CHUNK_SIZE, regionKey, type WorldChunk, type WorldConfig } from './world';
 import { featureIntersectsBounds, generateRegion, type LandmarkAnchor, type RegionData, type ResourceAnchor, type RoadEndpoint, type SettlementShell } from './regions';
 import { generateSettlementLayout, layoutIntersectsBounds, type SettlementLayout } from './settlements';
+import { generateRoadCell, roadSegmentIntersectsBounds, ROAD_NETWORK_VERSION, roadGraphCell, type RoadNetwork, type RoadSegment } from './roads';
 
 interface CacheEntry<T> { value: T; }
 
@@ -13,8 +14,8 @@ class LruCache<T> {
   get size() { return this.entries.size; }
 }
 
-export interface WorldProviderOptions { chunkCapacity?: number; regionCapacity?: number; }
-export interface WorldProviderStats { chunks: { size: number; hits: number; misses: number }; regions: { size: number; hits: number; misses: number }; inFlightChunks: number; inFlightRegions: number; }
+export interface WorldProviderOptions { chunkCapacity?: number; regionCapacity?: number; roadCapacity?: number; }
+export interface WorldProviderStats { chunks: { size: number; hits: number; misses: number }; regions: { size: number; hits: number; misses: number }; roads: { size: number; hits: number; misses: number }; inFlightChunks: number; inFlightRegions: number; inFlightRoads: number; }
 
 function uniqueById<T>(items: T[], getId: (item: T) => string = (item) => (item as T & { id: string }).id) { return [...new Map(items.map((item) => [getId(item), item])).values()].sort((a, b) => getId(a).localeCompare(getId(b))); }
 function regionRequests(cx: number, cy: number) { const regionX = Math.floor(cx / REGION_CHUNK_SIZE); const regionY = Math.floor(cy / REGION_CHUNK_SIZE); const localX = ((cx % REGION_CHUNK_SIZE) + REGION_CHUNK_SIZE) % REGION_CHUNK_SIZE; const localY = ((cy % REGION_CHUNK_SIZE) + REGION_CHUNK_SIZE) % REGION_CHUNK_SIZE; const offsets = new Set<string>(['0,0']); if (localX <= 3) for (let dy = -1; dy <= 1; dy++) offsets.add(`-1,${dy}`); if (localX >= REGION_CHUNK_SIZE - 4) for (let dy = -1; dy <= 1; dy++) offsets.add(`1,${dy}`); if (localY <= 3) for (let dx = -1; dx <= 1; dx++) offsets.add(`${dx},-1`); if (localY >= REGION_CHUNK_SIZE - 4) for (let dx = -1; dx <= 1; dx++) offsets.add(`${dx},1`); return [...offsets].sort().map((value) => { const [dx, dy] = value.split(',').map(Number); return { rx: regionX + dx, ry: regionY + dy }; }); }
@@ -22,9 +23,24 @@ function regionRequests(cx: number, cy: number) { const regionX = Math.floor(cx 
 export class WorldProvider {
   private chunks: LruCache<WorldChunk>;
   private regions: LruCache<RegionData>;
+  private roads: LruCache<RoadNetwork>;
+  private roadCells: LruCache<RoadSegment[]>;
   private inFlightChunks = new Map<string, Promise<WorldChunk>>();
   private inFlightRegions = new Map<string, Promise<RegionData>>();
-  constructor(private config: WorldConfig, options: WorldProviderOptions = {}) { this.chunks = new LruCache(options.chunkCapacity ?? 64); this.regions = new LruCache(options.regionCapacity ?? 16); }
+  private inFlightRoads = new Map<string, Promise<RoadNetwork>>();
+  private inFlightRoadCells = new Map<string, Promise<RoadSegment[]>>();
+  constructor(private config: WorldConfig, options: WorldProviderOptions = {}) { this.chunks = new LruCache(options.chunkCapacity ?? 64); this.regions = new LruCache(options.regionCapacity ?? 16); this.roads = new LruCache(options.roadCapacity ?? 16); this.roadCells = new LruCache(options.roadCapacity ?? 16); }
+
+  getRoadNetwork(rx: number, ry: number, availableRegions: RegionData[] = []): Promise<RoadNetwork> {
+    const key = `${this.config.seed}:v${this.config.version}:roads-v${ROAD_NETWORK_VERSION}:${rx},${ry}`; const cached = this.roads.get(key); if (cached) return Promise.resolve(cached);
+    const existing = this.inFlightRoads.get(key); if (existing) return existing;
+    const coordinates: Array<{ rx: number; ry: number }> = []; for (let y = ry - 1; y <= ry + 1; y++) for (let x = rx - 1; x <= rx + 1; x++) coordinates.push({ rx: x, ry: y });
+    const cell = roadGraphCell(rx, ry); const cellKey = `${this.config.seed}:v${this.config.version}:roads-cell:${cell.gx},${cell.gy}`;
+    const regionSource = availableRegions.length ? Promise.resolve(availableRegions) : Promise.all(coordinates.map((coordinate) => this.getRegion(coordinate.rx, coordinate.ry)));
+    const cellGenerated = Promise.resolve(this.roadCells.get(cellKey) ?? this.inFlightRoadCells.get(cellKey) ?? regionSource.then((regions) => generateRoadCell(this.config, regions, cell.gx, cell.gy).segments).then((segments) => { this.roadCells.set(cellKey, segments); return segments; }).finally(() => this.inFlightRoadCells.delete(cellKey)));
+    if (!this.roadCells.get(cellKey) && !this.inFlightRoadCells.has(cellKey)) this.inFlightRoadCells.set(cellKey, cellGenerated);
+    const request = Promise.resolve(cellGenerated).then((segments) => { const network = { key: { rx, ry }, nodes: [], segments: segments.filter((segment) => segment.ownerRegion.rx === rx && segment.ownerRegion.ry === ry) }; this.roads.set(key, network); return network; }).finally(() => this.inFlightRoads.delete(key)); this.inFlightRoads.set(key, request); return request;
+  }
 
   getRegion(rx: number, ry: number): Promise<RegionData> {
     const key = regionKey({ ...this.config, rx, ry }); const cached = this.regions.get(key); if (cached) return Promise.resolve(cached);
@@ -38,13 +54,14 @@ export class WorldProvider {
     const existing = this.inFlightChunks.get(key); if (existing) return existing;
     const request = Promise.resolve().then(async () => {
       const chunk = chunkAt(this.config, cx, cy); const minX = cx * CHUNK_SIZE; const minY = cy * CHUNK_SIZE; const bounds = { minX, minY, maxX: minX + CHUNK_SIZE - 1, maxY: minY + CHUNK_SIZE - 1 }; const regions = await Promise.all(regionRequests(cx, cy).map((coordinate) => this.getRegion(coordinate.rx, coordinate.ry)));
-      const settlements: SettlementShell[] = []; const settlementLayouts: SettlementLayout[] = []; const landmarks: LandmarkAnchor[] = []; const resources: ResourceAnchor[] = []; const roadEndpoints: RoadEndpoint[] = [];
+      const roadNetworks = await Promise.all([this.getRoadNetwork(Math.floor(cx / REGION_CHUNK_SIZE), Math.floor(cy / REGION_CHUNK_SIZE), regions)]); const settlements: SettlementShell[] = []; const settlementLayouts: SettlementLayout[] = []; const landmarks: LandmarkAnchor[] = []; const resources: ResourceAnchor[] = []; const roadEndpoints: RoadEndpoint[] = [];
+      const roads = roadNetworks.flatMap((network) => network.segments).filter((segment) => roadSegmentIntersectsBounds(segment, bounds));
       for (const region of regions) { for (const shell of region.settlements) if (featureIntersectsBounds(shell, bounds, shell.radius)) settlements.push(shell); for (const layout of region.settlementLayouts) if (layoutIntersectsBounds(layout, bounds)) settlementLayouts.push(layout); for (const landmark of region.landmarks) if (featureIntersectsBounds(landmark, bounds, 8)) landmarks.push(landmark); for (const resource of region.resources) if (featureIntersectsBounds(resource, bounds, 8)) resources.push(resource); for (const endpoint of region.roadEndpoints) if (featureIntersectsBounds(endpoint, bounds, 8)) roadEndpoints.push(endpoint); }
-      return { ...chunk, settlements: uniqueById(settlements), settlementLayouts: uniqueById(settlementLayouts, (layout) => layout.settlementId), landmarks: uniqueById(landmarks), resources: uniqueById(resources), roadEndpoints: uniqueById(roadEndpoints) };
+      return { ...chunk, settlements: uniqueById(settlements), settlementLayouts: uniqueById(settlementLayouts, (layout) => layout.settlementId), landmarks: uniqueById(landmarks), resources: uniqueById(resources), roadEndpoints: uniqueById(roadEndpoints), roads: uniqueById(roads) };
     }).then((chunk) => { this.chunks.set(key, chunk); return chunk; }).finally(() => this.inFlightChunks.delete(key));
     this.inFlightChunks.set(key, request); return request;
   }
 
-  clear() { this.chunks.clear(); this.regions.clear(); }
-  stats(): WorldProviderStats { return { chunks: { size: this.chunks.size, hits: this.chunks.hits, misses: this.chunks.misses }, regions: { size: this.regions.size, hits: this.regions.hits, misses: this.regions.misses }, inFlightChunks: this.inFlightChunks.size, inFlightRegions: this.inFlightRegions.size }; }
+  clear() { this.chunks.clear(); this.regions.clear(); this.roads.clear(); this.roadCells.clear(); this.inFlightRoadCells.clear(); }
+  stats(): WorldProviderStats { return { chunks: { size: this.chunks.size, hits: this.chunks.hits, misses: this.chunks.misses }, regions: { size: this.regions.size, hits: this.regions.hits, misses: this.regions.misses }, roads: { size: this.roads.size, hits: this.roads.hits, misses: this.roads.misses }, inFlightChunks: this.inFlightChunks.size, inFlightRegions: this.inFlightRegions.size, inFlightRoads: this.inFlightRoads.size }; }
 }
