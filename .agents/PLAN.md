@@ -7,7 +7,7 @@ Implement deterministic, performant generation for biomes, settlements, and orga
 - [x] Phase 1 — Deterministic generation foundation
 - [x] Phase 2 — Continuous geographic fields
 - [x] Phase 3 — Biome and hydrology systems
-- [ ] Phase 4 — Region-level feature planning
+- [x] Phase 4 — Region-level feature planning
 - [ ] Phase 5 — Organic settlement sprawl
 - [ ] Phase 6 — Organic road network
 - [ ] Phase 7 — Rendering and runtime performance
@@ -81,13 +81,13 @@ Use `[ ]` for pending, `[-]` for in progress, and `[x]` for completed work. Keep
 
 ## Phase 4 — Region-level feature planning
 
-- [ ] Define a region size larger than a chunk, such as 16×16 chunks.
-- [ ] Derive a stable region seed from world seed, generator version, and region coordinates.
-- [ ] Generate settlements, major landmarks, resource anchors, and road endpoints at region scope.
-- [ ] Query the current and neighboring regions when a chunk requests features near its bounds.
-- [ ] Add bounded region and chunk caches with deterministic keys.
-- [ ] Ensure global features are generated once logically and clipped only during rendering.
-- [ ] Define stable IDs for settlements, road segments, anchors, buildings, and districts.
+- [x] Define a region size larger than a chunk, such as 16×16 chunks.
+- [x] Derive a stable region seed from world seed, generator version, and region coordinates.
+- [x] Generate settlements, major landmarks, resource anchors, and road endpoints at region scope.
+- [x] Query the current and neighboring regions when a chunk requests features near its bounds.
+- [x] Add bounded region and chunk caches with deterministic keys.
+- [x] Ensure global features are generated once logically and clipped only during rendering.
+- [x] Define stable IDs for settlements, road segments, anchors, buildings, and districts.
 
 ### Phase 4 acceptance criteria
 
