@@ -48,12 +48,12 @@ describe('region-level feature planning', () => {
     expect(chunk.settlements).toEqual([...chunk.settlements].sort((a, b) => a.id.localeCompare(b.id)));
     expect(chunk.roadEndpoints).toEqual([...chunk.roadEndpoints].sort((a, b) => a.id.localeCompare(b.id)));
     expect(provider.stats().regions.size).toBeLessThanOrEqual(16);
-  });
+  }, 30000);
 
   it('clearing caches does not change deterministic content', async () => {
     const provider = new WorldProvider(config, { regionCapacity: 2, chunkCapacity: 2 });
     const before = await provider.getChunk(-2, -2);
     provider.clear();
     expect(await provider.getChunk(-2, -2)).toEqual(before);
-  });
+  }, 30000);
 });

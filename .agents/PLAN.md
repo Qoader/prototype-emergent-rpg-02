@@ -8,7 +8,7 @@ Implement deterministic, performant generation for biomes, settlements, and orga
 - [x] Phase 2 — Continuous geographic fields
 - [x] Phase 3 — Biome and hydrology systems
 - [x] Phase 4 — Region-level feature planning
-- [ ] Phase 5 — Organic settlement sprawl
+- [x] Phase 5 — Organic settlement sprawl
 - [ ] Phase 6 — Organic road network
 - [ ] Phase 7 — Rendering and runtime performance
 - [ ] Phase 8 — Validation, tuning, and acceptance
@@ -98,20 +98,20 @@ Use `[ ]` for pending, `[-]` for in progress, and `[x]` for completed work. Keep
 
 ## Phase 5 — Organic settlement sprawl
 
-- [ ] Generate candidate settlement points using deterministic Poisson-disc sampling or seeded region-local candidates.
-- [ ] Score candidates using slope, water access, fertility, biome, resources, landmarks, and distance from other settlements.
-- [ ] Reject deep water, steep slopes, unsuitable mountains, and candidates that violate spacing rules.
-- [ ] Select hamlets, villages, towns, and cities using stable score ordering and deterministic tie-breaking.
-- [ ] Add settlement metadata: stable ID, type, radius, population class, center, and anchors.
-- [ ] Place anchors such as center/keep, market, well, gates, river crossings, harbors, shrines, and resource sites.
-- [ ] Generate main streets between anchors using terrain-aware routing.
-- [ ] Generate secondary streets with branching, dead ends, and controlled deterministic irregularity.
-- [ ] Assign districts using road proximity, anchor influence, terrain suitability, water, and seeded variation.
-- [ ] Generate building plots near roads with Poisson-disc/rejection sampling.
-- [ ] Orient buildings toward nearby roads while varying setback, rotation, scale, and spacing.
-- [ ] Add gardens, yards, barns, pens, workshops, and other district-specific structures.
-- [ ] Add a low-density settlement fringe with cottages, farms, fields, and informal paths.
-- [ ] Ensure buildings do not overlap and remain within valid terrain and settlement bounds.
+- [x] Generate candidate settlement points using deterministic Poisson-disc sampling or seeded region-local candidates.
+- [x] Score candidates using slope, water access, fertility, biome, resources, landmarks, and distance from other settlements.
+- [x] Reject deep water, steep slopes, unsuitable mountains, and candidates that violate spacing rules.
+- [x] Select hamlets, villages, towns, and cities using stable score ordering and deterministic tie-breaking.
+- [x] Add settlement metadata: stable ID, type, radius, population class, center, and anchors.
+- [x] Place anchors such as center/keep, market, well, gates, river crossings, harbors, shrines, and resource sites.
+- [x] Generate main streets between anchors using terrain-aware routing.
+- [x] Generate secondary streets with branching, dead ends, and controlled deterministic irregularity.
+- [x] Assign districts using road proximity, anchor influence, terrain suitability, water, and seeded variation.
+- [x] Generate building plots near roads with Poisson-disc/rejection sampling.
+- [x] Orient buildings toward nearby roads while varying setback, rotation, scale, and spacing.
+- [x] Add gardens, yards, barns, pens, workshops, and other district-specific structures.
+- [x] Add a low-density settlement fringe with cottages, farms, fields, and informal paths.
+- [x] Ensure buildings do not overlap and remain within valid terrain and settlement bounds.
 
 ### Phase 5 acceptance criteria
 

@@ -1,6 +1,7 @@
 import { fieldsAt } from './fields';
-import { hydrologyAt, type Direction } from './hydrology';
-import { CHUNK_SIZE, REGION_CHUNK_SIZE, featureId, random, tileAtConfig, worldToRegion, type RegionCoordinate, type WorldConfig } from './world';
+import type { Direction } from './hydrology';
+import { CHUNK_SIZE, REGION_CHUNK_SIZE, featureId, random, worldToRegion, type RegionCoordinate, type WorldConfig } from './world';
+import type { SettlementLayout } from './settlements';
 
 export const REGION_SIZE_TILES = CHUNK_SIZE * REGION_CHUNK_SIZE;
 const CANDIDATES_PER_REGION = 6;
@@ -12,7 +13,7 @@ export interface SettlementShell { id: string; x: number; y: number; type: 'haml
 export interface LandmarkAnchor { id: string; type: 'ruin' | 'shrine' | 'watchtower' | 'natural-wonder'; x: number; y: number; importance: number; }
 export interface ResourceAnchor { id: string; type: 'forest' | 'fertile-land' | 'ore' | 'stone' | 'salt' | 'water'; x: number; y: number; importance: number; }
 export interface RoadEndpoint { id: string; ownerId: string; x: number; y: number; kind: 'settlement-gate' | 'landmark' | 'resource' | 'region-border'; importance: number; preferredDirections: Direction[]; }
-export interface RegionData { key: RegionCoordinate; bounds: RegionBounds; settlements: SettlementShell[]; landmarks: LandmarkAnchor[]; resources: ResourceAnchor[]; roadEndpoints: RoadEndpoint[]; }
+export interface RegionData { key: RegionCoordinate; bounds: RegionBounds; settlements: SettlementShell[]; settlementLayouts: SettlementLayout[]; landmarks: LandmarkAnchor[]; resources: ResourceAnchor[]; roadEndpoints: RoadEndpoint[]; }
 
 export function regionBounds(rx: number, ry: number): RegionBounds { const minX = rx * REGION_SIZE_TILES; const minY = ry * REGION_SIZE_TILES; return { minX, minY, maxX: minX + REGION_SIZE_TILES - 1, maxY: minY + REGION_SIZE_TILES - 1 }; }
 
@@ -23,10 +24,10 @@ function candidatePoint(config: WorldConfig, rx: number, ry: number, index: numb
 interface SettlementCandidate { id: string; x: number; y: number; rx: number; ry: number; score: number; type: SettlementShell['type']; }
 
 function settlementCandidate(config: WorldConfig, rx: number, ry: number, index: number): SettlementCandidate | null {
-  const point = candidatePoint(config, rx, ry, index); const tile = tileAtConfig(config, point.x, point.y); const fields = fieldsAt(config, point.x, point.y); const hydrology = hydrologyAt(config, point.x, point.y);
-  if (!tile.walkable || tile.terrain === 'mountain' || fields.slope > 0.12) return null;
-  const waterBonus = hydrology.waterBody !== 'none' || hydrology.shoreline ? 0.2 : 0;
-  const biomeBonus = tile.biome === 'grassland' || tile.biome === 'forest' ? 0.15 : tile.biome === 'coast' ? 0.12 : 0;
+  const point = candidatePoint(config, rx, ry, index); const fields = fieldsAt(config, point.x, point.y);
+  if (fields.elevation < 0.28 || fields.elevation > 0.78 || fields.slope > 0.12) return null;
+  const waterBonus = fields.elevation < 0.4 || fields.moisture > 0.65 ? 0.2 : 0;
+  const biomeBonus = fields.moisture > 0.58 ? 0.15 : fields.moisture > 0.4 ? 0.08 : 0;
   const score = fields.fertility * 0.45 + (1 - fields.slope) * 0.25 + waterBonus + biomeBonus + random(config, 'region:settlement-score', rx, ry, index) * 0.08;
   const type: SettlementShell['type'] = score > 0.72 ? 'city' : score > 0.58 ? 'town' : score > 0.42 ? 'village' : 'hamlet';
   const owner = ownerAt(point.x, point.y);
@@ -59,19 +60,19 @@ function shellFor(config: WorldConfig, candidate: SettlementCandidate): Settleme
 function regionAnchors(config: WorldConfig, region: RegionCoordinate) {
   const bounds = regionBounds(region.rx, region.ry); const landmarks: LandmarkAnchor[] = []; const resources: ResourceAnchor[] = [];
   for (let index = 0; index < 4; index++) {
-    const x = bounds.minX + 24 + Math.floor(random(config, 'region:landmark-x', region.rx, region.ry, index) * (REGION_SIZE_TILES - 48)); const y = bounds.minY + 24 + Math.floor(random(config, 'region:landmark-y', region.rx, region.ry, index) * (REGION_SIZE_TILES - 48)); const tile = tileAtConfig(config, x, y);
-    if (tile.walkable && random(config, 'region:landmark-keep', region.rx, region.ry, index) > 0.55) { const types: LandmarkAnchor['type'][] = ['ruin', 'shrine', 'watchtower', 'natural-wonder']; const type = types[Math.floor(random(config, 'region:landmark-type', region.rx, region.ry, index) * types.length)]; landmarks.push({ id: featureId(config, 'landmark', x, y), type, x, y, importance: 0.4 + random(config, 'region:landmark-importance', x, y) * 0.6 }); }
+    const x = bounds.minX + 24 + Math.floor(random(config, 'region:landmark-x', region.rx, region.ry, index) * (REGION_SIZE_TILES - 48)); const y = bounds.minY + 24 + Math.floor(random(config, 'region:landmark-y', region.rx, region.ry, index) * (REGION_SIZE_TILES - 48)); const fields = fieldsAt(config, x, y);
+    if (fields.elevation >= 0.28 && fields.slope < 0.18 && random(config, 'region:landmark-keep', region.rx, region.ry, index) > 0.55) { const types: LandmarkAnchor['type'][] = ['ruin', 'shrine', 'watchtower', 'natural-wonder']; const type = types[Math.floor(random(config, 'region:landmark-type', region.rx, region.ry, index) * types.length)]; landmarks.push({ id: featureId(config, 'landmark', x, y), type, x, y, importance: 0.4 + random(config, 'region:landmark-importance', x, y) * 0.6 }); }
   }
   for (let index = 0; index < 4; index++) {
-    const x = bounds.minX + 24 + Math.floor(random(config, 'region:resource-x', region.rx, region.ry, index) * (REGION_SIZE_TILES - 48)); const y = bounds.minY + 24 + Math.floor(random(config, 'region:resource-y', region.rx, region.ry, index) * (REGION_SIZE_TILES - 48)); const tile = tileAtConfig(config, x, y); const types: ResourceAnchor['type'][] = ['forest', 'fertile-land', 'ore', 'stone', 'salt', 'water'];
-    if (tile.walkable && random(config, 'region:resource-keep', region.rx, region.ry, index) > 0.48) { const type = types[Math.floor(random(config, 'region:resource-type', region.rx, region.ry, index) * types.length)]; resources.push({ id: featureId(config, 'resource', x, y), type, x, y, importance: 0.35 + random(config, 'region:resource-importance', x, y) * 0.65 }); }
+    const x = bounds.minX + 24 + Math.floor(random(config, 'region:resource-x', region.rx, region.ry, index) * (REGION_SIZE_TILES - 48)); const y = bounds.minY + 24 + Math.floor(random(config, 'region:resource-y', region.rx, region.ry, index) * (REGION_SIZE_TILES - 48)); const fields = fieldsAt(config, x, y); const types: ResourceAnchor['type'][] = ['forest', 'fertile-land', 'ore', 'stone', 'salt', 'water'];
+    if (fields.elevation >= 0.28 && fields.slope < 0.18 && random(config, 'region:resource-keep', region.rx, region.ry, index) > 0.48) { const type = types[Math.floor(random(config, 'region:resource-type', region.rx, region.ry, index) * types.length)]; resources.push({ id: featureId(config, 'resource', x, y), type, x, y, importance: 0.35 + random(config, 'region:resource-importance', x, y) * 0.65 }); }
   }
   return { landmarks, resources };
 }
 
 export function generateRegion(config: WorldConfig, rx: number, ry: number): RegionData {
   const key = { rx, ry }; const shells = selectedSettlements(config, key).map((candidate) => shellFor(config, candidate)); const anchors = regionAnchors(config, key); const roadEndpoints = [...shells.flatMap((shell) => shell.accessPoints), ...anchors.landmarks.map((anchor) => ({ id: `${anchor.id}:endpoint`, ownerId: anchor.id, x: anchor.x, y: anchor.y, kind: 'landmark' as const, importance: anchor.importance, preferredDirections: ['north', 'east', 'south', 'west'] as Direction[] })), ...anchors.resources.map((anchor) => ({ id: `${anchor.id}:endpoint`, ownerId: anchor.id, x: anchor.x, y: anchor.y, kind: 'resource' as const, importance: anchor.importance, preferredDirections: ['north', 'east', 'south', 'west'] as Direction[] }))];
-  return { key, bounds: regionBounds(rx, ry), settlements: shells, landmarks: anchors.landmarks, resources: anchors.resources, roadEndpoints: roadEndpoints.sort((a, b) => a.id.localeCompare(b.id)) };
+  return { key, bounds: regionBounds(rx, ry), settlements: shells, settlementLayouts: [], landmarks: anchors.landmarks, resources: anchors.resources, roadEndpoints: roadEndpoints.sort((a, b) => a.id.localeCompare(b.id)) };
 }
 
 export function featureIntersectsBounds(feature: { x: number; y: number }, bounds: RegionBounds, radius = 0) { return feature.x + radius >= bounds.minX && feature.x - radius <= bounds.maxX && feature.y + radius >= bounds.minY && feature.y - radius <= bounds.maxY; }

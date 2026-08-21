@@ -5,6 +5,7 @@ export const GENERATOR_VERSION = 2;
 import { fieldsAt } from './fields';
 import { hydrologyAt, type Hydrology } from './hydrology';
 import type { LandmarkAnchor, ResourceAnchor, RoadEndpoint, SettlementShell } from './regions';
+import type { SettlementLayout } from './settlements';
 export type Terrain = 'deep-water' | 'shallow-water' | 'shore' | 'plain' | 'hill' | 'mountain' | 'river' | 'starter-ground';
 export type Biome = 'ocean' | 'lake' | 'coast' | 'grassland' | 'forest' | 'swamp' | 'desert' | 'tundra' | 'alpine';
 export type Landmark = 'tree' | 'ruin' | 'shrine' | null;
@@ -15,7 +16,7 @@ export interface ChunkCoordinate { cx: number; cy: number; }
 export interface RegionCoordinate { rx: number; ry: number; }
 export interface ChunkKey extends ChunkCoordinate { seed: string; version: number; }
 export interface RegionKey extends RegionCoordinate { seed: string; version: number; }
-export interface WorldChunk extends ChunkCoordinate { tiles: Tile[]; settlements: SettlementShell[]; landmarks: LandmarkAnchor[]; resources: ResourceAnchor[]; roadEndpoints: RoadEndpoint[]; }
+export interface WorldChunk extends ChunkCoordinate { tiles: Tile[]; settlements: SettlementShell[]; settlementLayouts: SettlementLayout[]; landmarks: LandmarkAnchor[]; resources: ResourceAnchor[]; roadEndpoints: RoadEndpoint[]; }
 
 export function createWorldConfig(seed: string, version = GENERATOR_VERSION): WorldConfig { return { seed, version }; }
 
@@ -85,7 +86,7 @@ export function chunkAt(config: WorldConfig, cx: number, cy: number): WorldChunk
   assertInteger(cx, 'cx'); assertInteger(cy, 'cy');
   const tiles: Tile[] = [];
   for (let y = 0; y < CHUNK_SIZE; y++) for (let x = 0; x < CHUNK_SIZE; x++) tiles.push(tileAtConfig(config, cx * CHUNK_SIZE + x, cy * CHUNK_SIZE + y));
-  return { cx, cy, tiles, settlements: [], landmarks: [], resources: [], roadEndpoints: [] };
+  return { cx, cy, tiles, settlements: [], settlementLayouts: [], landmarks: [], resources: [], roadEndpoints: [] };
 }
 export function key(x: number, y: number) { return `${x},${y}`; }
 export function neighbors(tile: Tile) { return [[1, 0], [-1, 0], [0, 1], [0, -1]].map(([dx, dy]) => ({ x: tile.x + dx, y: tile.y + dy })); }
