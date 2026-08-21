@@ -12,5 +12,7 @@ body { touch-action: none; }
 .status-dot.walking { background: #f7c96e; box-shadow: 0 0 .45rem #f7c96e; }
 .seed { display: none; color: #9ba99d; font-size: .6rem; letter-spacing: .1em; }
 .seed strong { color: #d5b77c; font-weight: 600; }
-.hint { position: absolute; z-index: 2; bottom: max(1.1rem, env(safe-area-inset-bottom)); left: 50%; transform: translateX(-50%); padding: .65rem 1rem; border: 1px solid #ffffff1c; border-radius: 999px; background: #101923aa; color: #e3d7bc; font-size: .72rem; letter-spacing: .08em; text-transform: uppercase; white-space: nowrap; pointer-events: none; }
-@media (min-width: 620px) { .seed { display: block; } .hint { bottom: 1.5rem; } .hud { padding-left: 1.75rem; padding-right: 1.75rem; } }
+.tile-debug { position: absolute; z-index: 2; bottom: max(.75rem, env(safe-area-inset-bottom)); left: 50%; width: min(calc(100% - 2rem), 42rem); transform: translateX(-50%); padding: .6rem .85rem; border: 1px solid #ffffff1c; border-radius: .65rem; background: #101923cc; color: #e3d7bc; font-size: .68rem; line-height: 1.45; letter-spacing: .06em; text-align: center; text-transform: uppercase; pointer-events: none; }
+.tile-debug-title { color: #f7c96e; font-size: .62rem; font-weight: 700; letter-spacing: .12em; }
+.tile-debug-line { overflow-wrap: anywhere; }
+@media (min-width: 620px) { .seed { display: block; } .tile-debug { bottom: 1.25rem; } .hud { padding-left: 1.75rem; padding-right: 1.75rem; } }

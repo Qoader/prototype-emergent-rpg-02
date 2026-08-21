@@ -13,5 +13,7 @@ test.describe('Emberwild', () => {
       page.getByText('WORLD SEED EMBERWILD-01', { exact: true }),
     ).toBeVisible();
     await expect(page.locator('.canvas-host canvas')).toBeVisible();
+    await expect(page.locator('.tile-debug')).toContainText('CURRENT TILE');
+    await expect(page.locator('.tile-debug')).toContainText('starter-ground');
   });
 });
