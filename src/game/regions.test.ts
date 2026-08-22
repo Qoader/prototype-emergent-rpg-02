@@ -45,6 +45,15 @@ describe('region-level feature planning', () => {
     const provider = new WorldProvider(config, { regionCapacity: 16, chunkCapacity: 4 });
     const chunk = await provider.getChunk(0, 0);
     expect(chunk.tiles).toHaveLength(24 * 24);
+    const tilesByCoordinate = new Map(chunk.tiles.map((tile) => [`${tile.x},${tile.y}`, tile]));
+    for (const road of chunk.roads) for (const point of road.tiles) {
+      const tile = tilesByCoordinate.get(`${point.x},${point.y}`);
+      if (tile) { expect(tile.road).toBe(true); expect(tile.landmark).not.toBe('tree'); }
+    }
+    for (const layout of chunk.settlementLayouts) for (const street of layout.streets) for (const point of street.tiles) {
+      const tile = tilesByCoordinate.get(`${point.x},${point.y}`);
+      if (tile) { expect(tile.road).toBe(true); expect(tile.landmark).not.toBe('tree'); }
+    }
     expect(chunk.settlements).toEqual([...chunk.settlements].sort((a, b) => a.id.localeCompare(b.id)));
     expect(chunk.roadEndpoints).toEqual([...chunk.roadEndpoints].sort((a, b) => a.id.localeCompare(b.id)));
     expect(provider.stats().regions.size).toBeLessThanOrEqual(16);

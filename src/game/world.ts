@@ -3,10 +3,11 @@
 export const TILE_SIZE = 40;
 export const CHUNK_SIZE = 24;
 export const REGION_CHUNK_SIZE = 16;
-export const GENERATOR_VERSION = 4;
+export const GENERATOR_VERSION = 5;
+export const TREE_LANDMARK_THRESHOLD = 0.84;
 // Rare points of interest should stay special even across large explored areas.
-const SHRINE_DETAIL_THRESHOLD = 0.998;
-const RUIN_DETAIL_THRESHOLD = 0.99;
+const SHRINE_DETAIL_THRESHOLD = 0.9992;
+const RUIN_DETAIL_THRESHOLD = 0.996;
 import { fieldsAt } from './fields';
 import { hydrologyAt, type Hydrology } from './hydrology';
 import type { LandmarkAnchor, ResourceAnchor, RoadEndpoint, SettlementShell } from './regions';
@@ -15,7 +16,7 @@ import type { RoadSegment, RoadNetwork } from './roads';
 export type Terrain = 'deep-water' | 'shallow-water' | 'shore' | 'plain' | 'hill' | 'mountain' | 'river' | 'starter-ground';
 export type Biome = 'ocean' | 'lake' | 'coast' | 'grassland' | 'forest' | 'swamp' | 'desert' | 'tundra' | 'alpine';
 export type Landmark = 'tree' | 'ruin' | 'shrine' | null;
-export interface Tile { x: number; y: number; terrain: Terrain; biome: Biome; hydrology: Hydrology; elevation: number; movementCost: number; landmark: Landmark; walkable: boolean; }
+export interface Tile { x: number; y: number; terrain: Terrain; biome: Biome; hydrology: Hydrology; elevation: number; movementCost: number; landmark: Landmark; walkable: boolean; road: boolean; }
 export interface WorldConfig { seed: string; version: number; }
 export interface WorldCoordinate { x: number; y: number; }
 export interface ChunkCoordinate { cx: number; cy: number; }
@@ -85,8 +86,9 @@ function tileFromFields(config: WorldConfig, x: number, y: number, fields: Retur
   const biome = classifyBiome(fields, terrain, hydrology.waterBody);
   const walkable = terrain !== 'deep-water' && terrain !== 'shallow-water' && terrain !== 'river' && terrain !== 'mountain';
   const movementCost = terrain === 'starter-ground' || terrain === 'plain' ? 1 : terrain === 'shore' ? 1.5 : biome === 'forest' ? 1.8 : biome === 'swamp' ? 2.5 : biome === 'desert' ? 1.4 : biome === 'tundra' ? 1.8 : terrain === 'hill' ? 2.2 : Infinity;
-  const detail = random(config, 'landmark', x, y); const landmark = walkable && detail > SHRINE_DETAIL_THRESHOLD ? 'shrine' : walkable && detail > RUIN_DETAIL_THRESHOLD ? 'ruin' : walkable && detail > 0.68 ? 'tree' : null;
-  return { x, y, terrain, biome, hydrology, elevation: fields.elevation, movementCost, landmark, walkable };
+  const detail = random(config, 'landmark', x, y); const coastal = terrain === 'shore' || biome === 'coast' || hydrology.shoreline;
+  const landmark = walkable && detail > SHRINE_DETAIL_THRESHOLD ? 'shrine' : walkable && detail > RUIN_DETAIL_THRESHOLD ? 'ruin' : walkable && !coastal && detail > TREE_LANDMARK_THRESHOLD ? 'tree' : null;
+  return { x, y, terrain, biome, hydrology, elevation: fields.elevation, movementCost, landmark, walkable, road: false };
 }
 
 export function classifyBiome(fields: ReturnType<typeof fieldsAt>, terrain: Terrain, waterBody: Hydrology['waterBody']): Biome {

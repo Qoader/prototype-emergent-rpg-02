@@ -1,16 +1,16 @@
 import { fieldsAt } from './fields';
 import type { RegionData, RoadEndpoint } from './regions';
 import { REGION_SIZE_TILES } from './regions';
-import { random, tileAtConfig, worldToRegion, type RegionCoordinate, type WorldConfig, type WorldCoordinate } from './world';
+import { key, random, tileAtConfig, worldToRegion, type RegionCoordinate, type WorldConfig, type WorldCoordinate } from './world';
 import type { WorldPoint } from './settlements';
 
-export const ROAD_NETWORK_VERSION = 1;
+export const ROAD_NETWORK_VERSION = 2;
 export const ROAD_GRAPH_REGION_SIZE = 4;
 const COARSE_CELL_SIZE = 8;
 const MAX_NEIGHBORS = 3;
 
 export type RoadImportance = 'trail' | 'road' | 'highway';
-export interface RoadNode { id: string; ownerId: string; x: number; y: number; kind: RoadEndpoint['kind']; importance: number; }
+export interface RoadNode { id: string; ownerId: string; x: number; y: number; kind: RoadEndpoint['kind'] | 'junction'; importance: number; }
 export interface Bridge { id: string; roadId: string; tiles: WorldCoordinate[]; points: WorldPoint[]; width: number; }
 export interface RoadSegment { id: string; parentId: string; ownerRegion: RegionCoordinate; from: RoadNode; to: RoadNode; importance: RoadImportance; width: number; tiles: WorldCoordinate[]; points: WorldPoint[]; bridges: Bridge[]; }
 export interface RoadNetwork { key: RegionCoordinate; nodes: RoadNode[]; segments: RoadSegment[]; }
@@ -46,7 +46,7 @@ function selectEdges(config: WorldConfig, nodes: RoadNode[], cell: { gx: number;
   return selected;
 }
 
-function coarseRoute(config: WorldConfig, from: RoadNode, to: RoadNode, cell: { gx: number; gy: number }) {
+function coarseRoute(config: WorldConfig, from: RoadNode, to: RoadNode, cell: { gx: number; gy: number }, claimedRoadTiles: Set<string>) {
   const start = { x: Math.floor(from.x / COARSE_CELL_SIZE), y: Math.floor(from.y / COARSE_CELL_SIZE) }; const target = { x: Math.floor(to.x / COARSE_CELL_SIZE), y: Math.floor(to.y / COARSE_CELL_SIZE) };
   const margin = 6; const minX = Math.min(start.x, target.x) - margin; const maxX = Math.max(start.x, target.x) + margin; const minY = Math.min(start.y, target.y) - margin; const maxY = Math.max(start.y, target.y) + margin;
   const key = (x: number, y: number) => `${x},${y}`; const frontier = new RouteHeap(); frontier.push({ ...start, score: 0 }); const cost = new Map([[key(start.x, start.y), 0]]); const came = new Map<string, string | null>([[key(start.x, start.y), null]]);
@@ -57,7 +57,7 @@ function coarseRoute(config: WorldConfig, from: RoadNode, to: RoadNode, cell: { 
       const wx = x * COARSE_CELL_SIZE + Math.floor(COARSE_CELL_SIZE / 2); const wy = y * COARSE_CELL_SIZE + Math.floor(COARSE_CELL_SIZE / 2); const fields = fieldsAt(config, wx, wy);
       if (fields.elevation < 0.24 || fields.slope > 0.24) continue;
       const terrain = tileAtConfig(config, wx, wy).terrain; if (terrain === 'deep-water' || terrain === 'shallow-water' || terrain === 'mountain') continue;
-      const nextKey = key(x, y); const nextCost = (cost.get(key(current.x, current.y)) ?? Infinity) + 1 + fields.slope * 10 + fields.roughness * 1.8 + random(config, 'road:cost-noise', cell.gx, cell.gy, x, y) * 0.08;
+      const nextKey = key(x, y); const roadPreference = claimedRoadTiles.has(nextKey) ? 0.2 : 1; const nextCost = (cost.get(key(current.x, current.y)) ?? Infinity) + roadPreference + fields.slope * 10 + fields.roughness * 1.8 + random(config, 'road:cost-noise', cell.gx, cell.gy, x, y) * 0.08;
       if (nextCost < (cost.get(nextKey) ?? Infinity)) { cost.set(nextKey, nextCost); came.set(nextKey, key(current.x, current.y)); frontier.push({ x, y, score: nextCost + Math.abs(x - target.x) + Math.abs(y - target.y) }); }
     }
   }
@@ -83,8 +83,17 @@ function splitSegment(parentId: string, from: RoadNode, to: RoadNode, path: Worl
 
 export function generateRoadCell(config: WorldConfig, regions: RegionData[], gx: number, gy: number) {
   const cell = { gx, gy }; const nodeMap = new Map<string, RoadNode>(); for (const region of regions) for (const endpoint of region.roadEndpoints) nodeMap.set(endpoint.ownerId, { id: endpoint.id, ownerId: endpoint.ownerId, x: endpoint.x, y: endpoint.y, kind: endpoint.kind, importance: endpoint.importance });
-  const center = { x: (cell.gx * ROAD_GRAPH_REGION_SIZE + 2) * REGION_SIZE_TILES, y: (cell.gy * ROAD_GRAPH_REGION_SIZE + 2) * REGION_SIZE_TILES }; const nodes = [...nodeMap.values()].sort((a, b) => distance(a, center) - distance(b, center) || b.importance - a.importance || a.id.localeCompare(b.id)).slice(0, 3).sort((a, b) => a.id.localeCompare(b.id)); const segments: RoadSegment[] = [];
-  for (const edge of selectEdges(config, nodes, cell)) { const path = coarseRoute(config, edge.a, edge.b, cell); if (path.length < 2) continue; const parentId = `${config.seed}:v${config.version}:road:${edge.a.id}|${edge.b.id}`; segments.push(...splitSegment(parentId, edge.a, edge.b, path, config)); }
+  const center = { x: (cell.gx * ROAD_GRAPH_REGION_SIZE + 2) * REGION_SIZE_TILES, y: (cell.gy * ROAD_GRAPH_REGION_SIZE + 2) * REGION_SIZE_TILES }; const nodes = [...nodeMap.values()].sort((a, b) => distance(a, center) - distance(b, center) || b.importance - a.importance || a.id.localeCompare(b.id)).slice(0, 3).sort((a, b) => a.id.localeCompare(b.id)); const segments: RoadSegment[] = []; const claimed = new Map<string, RoadNode>();
+  const junctionFor = (point: WorldCoordinate, importanceValue: number) => { const id = `${config.seed}:v${config.version}:road-junction:${cell.gx},${cell.gy}:${point.x},${point.y}`; const existing = claimed.get(key(point.x, point.y)); if (existing?.kind === 'junction') return existing; const node: RoadNode = { id, ownerId: id, x: point.x, y: point.y, kind: 'junction', importance: Math.max(importanceValue, existing?.importance ?? 0) }; claimed.set(key(point.x, point.y), node); return node; };
+  for (const edge of selectEdges(config, nodes, cell).sort((a, b) => `${a.a.id}|${a.b.id}`.localeCompare(`${b.a.id}|${b.b.id}`))) {
+    const claimedCoarse = new Set([...claimed.keys()].map((value) => { const [x, y] = value.split(',').map(Number); return key(Math.floor(x / COARSE_CELL_SIZE), Math.floor(y / COARSE_CELL_SIZE)); }));
+    const path = coarseRoute(config, edge.a, edge.b, cell, claimedCoarse); if (path.length < 2) continue;
+    const parentId = `${config.seed}:v${config.version}:road:${edge.a.id}|${edge.b.id}`; let destination = edge.b; let emitted = path;
+    for (let index = 1; index < path.length; index++) { const existing = claimed.get(key(path[index].x, path[index].y)); if (!existing) continue; destination = index === path.length - 1 && path[index].x === edge.b.x && path[index].y === edge.b.y ? edge.b : junctionFor(path[index], Math.max(edge.a.importance, edge.b.importance)); emitted = path.slice(0, index + 1); break; }
+    if (emitted.length < 2) continue;
+    for (let index = 0; index < emitted.length; index++) { const point = emitted[index]; if (!claimed.has(key(point.x, point.y))) claimed.set(key(point.x, point.y), index === emitted.length - 1 && point.x === destination.x && point.y === destination.y ? destination : edge.a); }
+    segments.push(...splitSegment(parentId, edge.a, destination, emitted, config));
+  }
   return { nodes, segments: segments.sort((a, b) => a.id.localeCompare(b.id)) };
 }
 

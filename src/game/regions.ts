@@ -7,8 +7,8 @@ import type { SettlementLayout } from './settlements';
 export const REGION_SIZE_TILES = CHUNK_SIZE * REGION_CHUNK_SIZE;
 const CANDIDATES_PER_REGION = 6;
 const MIN_SETTLEMENT_SPACING = 120;
-const SHRINE_LANDMARK_CHANCE = 0.12;
-const RUIN_LANDMARK_CHANCE = 0.18;
+const SHRINE_LANDMARK_CHANCE = 0.048;
+const RUIN_LANDMARK_CHANCE = 0.072;
 
 export interface RegionBounds { minX: number; minY: number; maxX: number; maxY: number; }
 export interface SettlementAnchor { id: string; type: 'center' | 'gate' | 'market' | 'well' | 'crossing' | 'harbor' | 'resource'; x: number; y: number; }
