@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { generateRoadNetwork, generateStarterRoad, roadGraphCell } from './roads';
+import { generateRoadCell, generateRoadNetwork, generateStarterRoad, roadGraphCell } from './roads';
 import { generateRegion, regionBounds, type RegionData } from './regions';
 import { createWorldConfig, findStartingPosition, worldToRegion } from './world';
 
@@ -12,6 +12,13 @@ function fixture(rx: number, ry: number): RegionData {
 }
 
 describe('organic road planning', () => {
+  it('always plans all four border portals for an empty cell', () => {
+    const config = createWorldConfig('PORTAL-TEST');
+    const generated = generateRoadCell(config, [fixture(0, 0)], 0, 0);
+    expect(generated.nodes.filter((node) => node.kind === 'region-border')).toHaveLength(4);
+    expect(new Set(generated.nodes.filter((node) => node.kind === 'region-border').map((node) => node.id)).size).toBe(4);
+  });
+
   it('uses a stable graph cell and deterministic segment IDs', () => {
     const config = createWorldConfig('ROAD-TEST'); const regions = [fixture(0, 0)];
     const first = generateRoadNetwork(config, 0, 0, regions); const second = generateRoadNetwork(config, 0, 0, regions);
@@ -24,6 +31,7 @@ describe('organic road planning', () => {
     const segments = generateStarterRoad(config, start, regions);
     expect(segments.length).toBeGreaterThan(0);
     expect(segments[0].from.kind).toBe('player-start');
+    expect(segments.filter((segment) => segment.from.kind === 'player-start').length).toBeGreaterThanOrEqual(2);
     expect(segments.some((segment) => segment.to.kind === 'settlement-gate')).toBe(true);
     expect(segments.flatMap((segment) => segment.tiles)).toContainEqual(start);
   }, 30000);
