@@ -13,6 +13,12 @@ body { touch-action: none; }
 .seed { display: none; color: #9ba99d; font-size: .6rem; letter-spacing: .1em; }
 .seed strong { color: #d5b77c; font-weight: 600; }
 .tile-debug { position: absolute; z-index: 2; bottom: max(.75rem, env(safe-area-inset-bottom)); left: 50%; width: min(calc(100% - 2rem), 42rem); transform: translateX(-50%); padding: .6rem .85rem; border: 1px solid #ffffff1c; border-radius: .65rem; background: #101923cc; color: #e3d7bc; font-size: .68rem; line-height: 1.45; letter-spacing: .06em; text-align: center; text-transform: uppercase; pointer-events: none; }
+.settlement-banner { position: absolute; z-index: 2; bottom: calc(max(.75rem, env(safe-area-inset-bottom)) + 3.35rem); left: 50%; width: min(calc(100% - 3rem), 30rem); transform: translateX(-50%); padding: .32rem 2.4rem .45rem; border: 2px solid #6b4529; border-radius: .2rem; background: linear-gradient(#e8c889, #b87846); box-shadow: 0 3px 0 #3e2a20, 0 5px 14px #09101899; color: #3c281d; text-align: center; text-transform: uppercase; pointer-events: none; }
+.settlement-banner::before, .settlement-banner::after { position: absolute; top: 50%; width: 1.35rem; height: 1.8rem; border: 2px solid #6b4529; background: #b87846; content: ''; transform: translateY(-50%) rotate(45deg); z-index: -1; }
+.settlement-banner::before { left: -.65rem; }
+.settlement-banner::after { right: -.65rem; }
+.settlement-banner-type { font-size: .55rem; font-weight: 800; letter-spacing: .18em; opacity: .78; }
+.settlement-banner-name { overflow: hidden; font-family: Georgia, 'Times New Roman', serif; font-size: clamp(1rem, 3.5vw, 1.45rem); font-weight: 700; letter-spacing: .08em; line-height: 1.15; text-overflow: ellipsis; white-space: nowrap; }
 .tile-debug-title { color: #f7c96e; font-size: .62rem; font-weight: 700; letter-spacing: .12em; }
 .tile-debug-line { overflow-wrap: anywhere; }
-@media (min-width: 620px) { .seed { display: block; } .tile-debug { bottom: 1.25rem; } .hud { padding-left: 1.75rem; padding-right: 1.75rem; } }
+@media (min-width: 620px) { .seed { display: block; } .tile-debug { bottom: 1.25rem; } .settlement-banner { bottom: 4rem; } .hud { padding-left: 1.75rem; padding-right: 1.75rem; } }

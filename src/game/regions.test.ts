@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { generateRegion, regionBounds } from './regions';
+import { generateRegion, regionBounds, settlementName } from './regions';
 import { WorldProvider } from './WorldProvider';
 import { createWorldConfig, REGION_CHUNK_SIZE } from './world';
 
@@ -19,6 +19,8 @@ describe('region-level feature planning', () => {
     const features = [...region.settlements, ...region.landmarks, ...region.resources, ...region.roadEndpoints];
     expect(new Set(features.map((feature) => feature.id)).size).toBe(features.length);
     for (const settlement of region.settlements) {
+      expect(settlement.name).toBe(settlementName(config, settlement.id));
+      expect(settlement.name.length).toBeGreaterThan(0);
       expect(settlement.radius).toBeGreaterThan(0);
       expect(settlement.anchors.every((anchor) => anchor.id.startsWith(settlement.id))).toBe(true);
       expect(settlement.accessPoints.every((endpoint) => endpoint.ownerId === settlement.id)).toBe(true);
@@ -28,6 +30,11 @@ describe('region-level feature planning', () => {
 
   it('changes region features with the world seed', () => {
     expect(generateRegion(config, 1, -1)).not.toEqual(generateRegion(createWorldConfig('OTHER'), 1, -1));
+  });
+
+  it('generates stable settlement names for a seed and settlement id', () => {
+    expect(settlementName(config, 'town-id')).toBe(settlementName(config, 'town-id'));
+    expect(settlementName(config, 'town-id')).not.toBe(settlementName(createWorldConfig('OTHER'), 'town-id'));
   });
 
   it('deduplicates concurrent requests and regenerates after eviction', async () => {

@@ -12,7 +12,7 @@ const RUIN_LANDMARK_CHANCE = 0.072;
 
 export interface RegionBounds { minX: number; minY: number; maxX: number; maxY: number; }
 export interface SettlementAnchor { id: string; type: 'center' | 'gate' | 'market' | 'well' | 'crossing' | 'harbor' | 'resource'; x: number; y: number; }
-export interface SettlementShell { id: string; x: number; y: number; type: 'hamlet' | 'village' | 'town' | 'city'; radius: number; populationClass: number; footprint: { width: number; height: number; rotation: number }; anchors: SettlementAnchor[]; accessPoints: RoadEndpoint[]; }
+export interface SettlementShell { id: string; name: string; x: number; y: number; type: 'hamlet' | 'village' | 'town' | 'city'; radius: number; populationClass: number; footprint: { width: number; height: number; rotation: number }; anchors: SettlementAnchor[]; accessPoints: RoadEndpoint[]; }
 export interface LandmarkAnchor { id: string; type: 'ruin' | 'shrine' | 'watchtower' | 'natural-wonder'; x: number; y: number; importance: number; }
 export interface ResourceAnchor { id: string; type: 'forest' | 'fertile-land' | 'ore' | 'stone' | 'salt' | 'water'; x: number; y: number; importance: number; }
 export interface RoadEndpoint { id: string; ownerId: string; x: number; y: number; kind: 'settlement-gate' | 'landmark' | 'resource' | 'region-border'; importance: number; preferredDirections: Direction[]; }
@@ -37,6 +37,15 @@ function settlementCandidate(config: WorldConfig, rx: number, ry: number, index:
   return { id: featureId(config, 'settlement', point.x, point.y), ...point, rx: owner.rx, ry: owner.ry, score, type };
 }
 
+const SETTLEMENT_NAME_PREFIXES = ['Ash', 'Briar', 'Cinder', 'Dun', 'Elder', 'Fallow', 'Glimmer', 'Grim', 'Hearth', 'Iron', 'Raven', 'Rose', 'Silver', 'Thorn', 'Wick', 'Winter'];
+const SETTLEMENT_NAME_SUFFIXES = ['barrow', 'brook', 'combe', 'crest', 'fall', 'ford', 'haven', 'mere', 'mont', 'stead', 'stone', 'vale', 'watch', 'wick', 'wood'];
+
+export function settlementName(config: WorldConfig, id: string) {
+  const prefix = SETTLEMENT_NAME_PREFIXES[Math.floor(random(config, 'region:settlement-name-prefix', id) * SETTLEMENT_NAME_PREFIXES.length)];
+  const suffix = SETTLEMENT_NAME_SUFFIXES[Math.floor(random(config, 'region:settlement-name-suffix', id) * SETTLEMENT_NAME_SUFFIXES.length)];
+  return `${prefix}${suffix}`;
+}
+
 function selectedSettlements(config: WorldConfig, region: RegionCoordinate) {
   const candidates: SettlementCandidate[] = [];
   for (let ry = region.ry - 1; ry <= region.ry + 1; ry++) for (let rx = region.rx - 1; rx <= region.rx + 1; rx++) for (let index = 0; index < CANDIDATES_PER_REGION; index++) {
@@ -57,7 +66,7 @@ function shellFor(config: WorldConfig, candidate: SettlementCandidate): Settleme
     const x = candidate.x + dx * radius; const y = candidate.y + dy * radius; const anchor: SettlementAnchor = { id: `${candidate.id}:gate:${name}`, type: 'gate', x, y }; anchors.push(anchor);
     accessPoints.push({ id: anchor.id, ownerId: candidate.id, x, y, kind: 'settlement-gate', importance: candidate.score, preferredDirections: [name === 'north' ? 'north' : name === 'east' ? 'east' : name === 'south' ? 'south' : 'west'] });
   }
-  return { id: candidate.id, x: candidate.x, y: candidate.y, type: candidate.type, radius, populationClass: Math.round(candidate.score * 100), footprint: { width: radius * 2, height: radius * 2, rotation }, anchors, accessPoints };
+  return { id: candidate.id, name: settlementName(config, candidate.id), x: candidate.x, y: candidate.y, type: candidate.type, radius, populationClass: Math.round(candidate.score * 100), footprint: { width: radius * 2, height: radius * 2, rotation }, anchors, accessPoints };
 }
 
 function regionAnchors(config: WorldConfig, region: RegionCoordinate) {
