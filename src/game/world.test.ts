@@ -1,6 +1,17 @@
 import { describe, expect, it } from 'vitest';
-import { CHUNK_SIZE, GENERATOR_VERSION, REGION_CHUNK_SIZE, chunkAt, chunkKey, createWorldConfig, featureId, findPath, random, regionKey, tileAt, tileAtConfig, worldToChunk, worldToRegion } from './world';
+import { CHUNK_SIZE, GENERATOR_VERSION, REGION_CHUNK_SIZE, STARTER_RADIUS, chunkAt, chunkKey, createWorldConfig, featureId, findPath, findStartingPosition, random, regionKey, tileAt, tileAtConfig, worldToChunk, worldToRegion } from './world';
 describe('procedural Emberwild', () => {
+  it('selects a deterministic land starting zone', () => {
+    for (const seed of ['EMBERWILD-01', 'OTHER', 'PHASE7']) {
+      const config = createWorldConfig(seed); const first = findStartingPosition(config); const second = findStartingPosition(config);
+      expect(second).toEqual(first);
+      for (let y = -STARTER_RADIUS; y <= STARTER_RADIUS; y++) for (let x = -STARTER_RADIUS; x <= STARTER_RADIUS; x++) {
+        if (Math.hypot(x, y) > STARTER_RADIUS) continue;
+        const tile = tileAt(seed, first.x + x, first.y + y);
+        expect(tile.hydrology.waterBody).toBe('none'); expect(tile.walkable).toBe(true); expect(tile.terrain).toBe('starter-ground');
+      }
+    }
+  });
   it('is deterministic', () => expect(tileAt('EMBERWILD-01', 11, -8)).toEqual(tileAt('EMBERWILD-01', 11, -8)));
   it('changes with the seed', () => expect(tileAt('EMBERWILD-01', 11, -8)).not.toEqual(tileAt('OTHER', 11, -8)));
   it('does not place trees on coastal tiles', () => {
@@ -47,20 +58,20 @@ describe('procedural Emberwild', () => {
     expect(() => tileAtConfig(createWorldConfig('EMBERWILD-01', GENERATOR_VERSION + 1), 0, 0)).toThrow('Unsupported world generator version');
   });
   it('finds the geometric diagonal route', () => {
-    const path = findPath('EMBERWILD-01', tileAt('EMBERWILD-01', 0, 0), tileAt('EMBERWILD-01', 3, 3));
+    const start = findStartingPosition(createWorldConfig('EMBERWILD-01')); const path = findPath('EMBERWILD-01', tileAt('EMBERWILD-01', start.x, start.y), tileAt('EMBERWILD-01', start.x + 3, start.y + 3));
     expect(path.length).toBeGreaterThan(0);
-    expect(path.every((tile, index) => { const previous = index === 0 ? { x: 0, y: 0 } : path[index - 1]; return Math.abs(tile.x - previous.x) <= 1 && Math.abs(tile.y - previous.y) <= 1; })).toBe(true);
+    expect(path.every((tile, index) => { const previous = index === 0 ? start : path[index - 1]; return Math.abs(tile.x - previous.x) <= 1 && Math.abs(tile.y - previous.y) <= 1; })).toBe(true);
   });
   it('keeps paths inside the current and neighboring chunks', () => {
-    const path = findPath('EMBERWILD-01', tileAt('EMBERWILD-01', 0, 0), tileAt('EMBERWILD-01', 100, 100));
+    const start = findStartingPosition(createWorldConfig('EMBERWILD-01')); const path = findPath('EMBERWILD-01', tileAt('EMBERWILD-01', start.x, start.y), tileAt('EMBERWILD-01', 100, 100));
     expect(path.length).toBeGreaterThan(0);
     expect(path.every((tile) => tile.x >= -CHUNK_SIZE && tile.x < CHUNK_SIZE * 2 && tile.y >= -CHUNK_SIZE && tile.y < CHUNK_SIZE * 2)).toBe(true);
   });
   it('stops at the closest reachable tile when the destination is blocked', () => {
-    const blocked = { ...tileAt('EMBERWILD-01', 0, 0), walkable: false };
-    const path = findPath('EMBERWILD-01', tileAt('EMBERWILD-01', 1, 1), blocked);
+    const start = findStartingPosition(createWorldConfig('EMBERWILD-01')); const blocked = { ...tileAt('EMBERWILD-01', start.x, start.y), walkable: false };
+    const path = findPath('EMBERWILD-01', tileAt('EMBERWILD-01', start.x + 1, start.y + 1), blocked);
     expect(path.length).toBeGreaterThan(0);
-    expect(path.at(-1)).not.toMatchObject({ x: 0, y: 0 });
+    expect(path.at(-1)).not.toMatchObject(start);
   });
 
   it('keeps random-access variation directionally balanced', () => {

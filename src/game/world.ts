@@ -5,6 +5,8 @@ export const CHUNK_SIZE = 24;
 export const REGION_CHUNK_SIZE = 16;
 export const GENERATOR_VERSION = 5;
 export const TREE_LANDMARK_THRESHOLD = 0.84;
+export const STARTER_RADIUS = 2;
+const START_SEARCH_RADIUS = 96;
 // Rare points of interest should stay special even across large explored areas.
 const SHRINE_DETAIL_THRESHOLD = 0.9992;
 const RUIN_DETAIL_THRESHOLD = 0.996;
@@ -26,6 +28,8 @@ export interface RegionKey extends RegionCoordinate { seed: string; version: num
 export interface WorldChunk extends ChunkCoordinate { tiles: Tile[]; settlements: SettlementShell[]; settlementLayouts: SettlementLayout[]; landmarks: LandmarkAnchor[]; resources: ResourceAnchor[]; roadEndpoints: RoadEndpoint[]; roads: RoadSegment[]; }
 
 export function createWorldConfig(seed: string, version = GENERATOR_VERSION): WorldConfig { return { seed, version }; }
+
+const startingPositions = new Map<string, WorldCoordinate>();
 
 function hashInput(input: string) {
   let h = 2166136261;
@@ -66,6 +70,35 @@ export function chunkKey(key: ChunkKey) { return `${key.seed}:v${key.version}:ch
 export function regionKey(key: RegionKey) { return `${key.seed}:v${key.version}:region:${key.rx},${key.ry}`; }
 export function featureId(config: WorldConfig, namespace: string, x: number, y: number) { return `${config.seed}:v${config.version}:${namespace}:${x},${y}`; }
 
+function startingPositionKey(config: WorldConfig) { return `${config.seed}:v${config.version}`; }
+
+function starterLand(config: WorldConfig, x: number, y: number) {
+  const fields = fieldsAt(config, x, y);
+  return fields.elevation >= 0.28 && fields.elevation <= 0.76 && fields.slope <= 0.14 && hydrologyAt(config, x, y, fields).waterBody === 'none';
+}
+
+/** Finds a stable patch of contiguous land for the player's initial position. */
+export function findStartingPosition(config: WorldConfig): WorldCoordinate {
+  if (config.version !== GENERATOR_VERSION) throw new Error(`Unsupported world generator version: ${config.version}`);
+  const cacheKey = startingPositionKey(config); const cached = startingPositions.get(cacheKey); if (cached) return { ...cached };
+  for (let radius = 0; radius <= START_SEARCH_RADIUS; radius++) {
+    const candidates: WorldCoordinate[] = [];
+    for (let y = -radius; y <= radius; y++) for (let x = -radius; x <= radius; x++) {
+      if (Math.max(Math.abs(x), Math.abs(y)) !== radius || !starterLand(config, x, y)) continue;
+      let surroundingLand = true;
+      for (let dy = -STARTER_RADIUS; dy <= STARTER_RADIUS && surroundingLand; dy++) for (let dx = -STARTER_RADIUS; dx <= STARTER_RADIUS; dx++) {
+        if (!starterLand(config, x + dx, y + dy)) { surroundingLand = false; break; }
+      }
+      if (surroundingLand) candidates.push({ x, y });
+    }
+    if (candidates.length) {
+      candidates.sort((a, b) => a.y - b.y || a.x - b.x);
+      const position = candidates[0]; startingPositions.set(cacheKey, position); return { ...position };
+    }
+  }
+  throw new Error(`Unable to find a land starting position within ${START_SEARCH_RADIUS} tiles`);
+}
+
 export function tileAt(seed: string, x: number, y: number): Tile { return tileAtConfig(createWorldConfig(seed), x, y); }
 
 export function tileAtConfig(config: WorldConfig, x: number, y: number): Tile {
@@ -74,7 +107,7 @@ export function tileAtConfig(config: WorldConfig, x: number, y: number): Tile {
 }
 
 function tileFromFields(config: WorldConfig, x: number, y: number, fields: ReturnType<typeof fieldsAt>, hydrology: Hydrology): Tile {
-  const starter = Math.hypot(x, y) <= 2;
+  const startingPosition = findStartingPosition(config); const starter = Math.hypot(x - startingPosition.x, y - startingPosition.y) <= STARTER_RADIUS;
   let terrain: Terrain;
   if (starter) terrain = 'starter-ground';
   else if (hydrology.waterBody === 'ocean' || hydrology.waterBody === 'lake') terrain = fields.elevation < 0.22 ? 'deep-water' : 'shallow-water';

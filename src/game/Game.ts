@@ -1,5 +1,5 @@
 import { Application, Container, Graphics, RenderTexture, Sprite } from 'pixi.js';
-import { CHUNK_SIZE, createWorldConfig, findPath, key, TILE_SIZE, tileAt, type Tile, type WorldChunk } from './world';
+import { CHUNK_SIZE, createWorldConfig, findPath, findStartingPosition, key, TILE_SIZE, tileAt, type Tile, type WorldChunk } from './world';
 import { WorldWorkerClient } from './WorldWorkerClient';
 import { PerformanceMonitor } from './performance';
 import { tileDebugInfo, type TileDebugInfo } from './tileDebug';
@@ -16,7 +16,7 @@ const HERO_FEET_OFFSET = 16;
 
 export class Game {
   private app = new Application(); private world = new Container(); private mapOverlay = new Container(); private actor = new Container(); private hero = new Container(); private marker = new Graphics(); private seed: string; private onStatus: Status; private onTileDebug: TileDebug; private px = 0; private py = 0; private path: Tile[] = []; private displays = new Map<string, ChunkDisplay>(); private prefetched = new Map<string, WorldChunk>(); private requested = new Set<string>(); private queue: StreamRequest[] = []; private activeRequests = 0; private maxConcurrentRequests = 1; private desired = new Set<string>(); private preload = new Set<string>(); private streamDirty = true; private lastStreamBounds = ''; private provider: WorldWorkerClient; private performance = new PerformanceMonitor(); private destroyed = false; private initialTerrainMarked = false; private elapsed = 0; private lastTileDebugSignature = '';
-  constructor(private host: HTMLElement, seed: string, onStatus: Status, onTileDebug: TileDebug = () => undefined) { this.seed = seed; this.onStatus = onStatus; this.onTileDebug = onTileDebug; this.provider = new WorldWorkerClient(createWorldConfig(seed)); void this.init(); }
+  constructor(private host: HTMLElement, seed: string, onStatus: Status, onTileDebug: TileDebug = () => undefined) { this.seed = seed; const startingPosition = findStartingPosition(createWorldConfig(seed)); this.px = startingPosition.x; this.py = startingPosition.y; this.onStatus = onStatus; this.onTileDebug = onTileDebug; this.provider = new WorldWorkerClient(createWorldConfig(seed)); void this.init(); }
   private async init() { try { await this.app.init({ resizeTo: this.host, background: '#294942', antialias: true, preference: 'webgl', resolution: Math.min(devicePixelRatio, 2) }); await this.provider.whenReady(); } catch { this.onStatus('WebGL or the world worker is required to enter the Emberwild'); return; } this.host.appendChild(this.app.canvas); performance.mark('emberwild-canvas-ready'); this.mapOverlay.addChild(this.marker); this.app.stage.addChild(this.world, this.mapOverlay, this.actor); this.buildHero(); this.app.stage.eventMode = 'static'; this.app.stage.hitArea = this.app.screen; this.app.stage.on('pointertap', (event) => this.go(event.global.x, event.global.y)); this.app.ticker.add((ticker) => this.tick(ticker.deltaMS / 1000)); window.addEventListener('resize', this.resize); this.resize(); }
   private buildHero() {
     const shadow = new Graphics().ellipse(0, 13, 13, 5).fill({ color: 0x10261f, alpha: 0.35 });
