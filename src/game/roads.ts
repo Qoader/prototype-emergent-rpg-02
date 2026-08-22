@@ -5,13 +5,13 @@ import { REGION_SIZE_TILES } from './regions';
 import { key, random, tileAtConfig, worldToRegion, type RegionCoordinate, type WorldConfig, type WorldCoordinate } from './world';
 import type { WorldPoint } from './settlements';
 
-export const ROAD_NETWORK_VERSION = 3;
+export const ROAD_NETWORK_VERSION = 4;
 export const ROAD_GRAPH_REGION_SIZE = 4;
 const COARSE_CELL_SIZE = 16;
 const MAX_NEIGHBORS = 4;
 
 export type RoadImportance = 'trail' | 'road' | 'highway';
-export interface RoadNode { id: string; ownerId: string; x: number; y: number; kind: RoadEndpoint['kind'] | 'junction'; importance: number; }
+export interface RoadNode { id: string; ownerId: string; x: number; y: number; kind: RoadEndpoint['kind'] | 'junction' | 'player-start'; importance: number; }
 export interface Bridge { id: string; roadId: string; tiles: WorldCoordinate[]; points: WorldPoint[]; width: number; }
 export interface RoadSegment { id: string; parentId: string; ownerRegion: RegionCoordinate; from: RoadNode; to: RoadNode; importance: RoadImportance; width: number; tiles: WorldCoordinate[]; points: WorldPoint[]; bridges: Bridge[]; }
 export interface RoadNetwork { key: RegionCoordinate; nodes: RoadNode[]; segments: RoadSegment[]; }
@@ -79,6 +79,27 @@ function coarseRoute(config: WorldConfig, from: RoadNode, to: RoadNode, cell: { 
   return stablePath(path);
 }
 
+function starterTileRoute(config: WorldConfig, from: RoadNode, to: RoadNode) {
+  const minX = Math.min(from.x, to.x) - 20; const maxX = Math.max(from.x, to.x) + 20;
+  const minY = Math.min(from.y, to.y) - 20; const maxY = Math.max(from.y, to.y) + 20;
+  const targetKey = key(to.x, to.y); const startKey = key(from.x, from.y); const tileCache = new Map<string, ReturnType<typeof tileAtConfig>>();
+  const getTile = (x: number, y: number) => { const id = key(x, y); const cached = tileCache.get(id); if (cached) return cached; const tile = tileAtConfig(config, x, y); tileCache.set(id, tile); return tile; };
+  const frontier = new RouteHeap(); frontier.push({ x: from.x, y: from.y, score: 0 }); const cost = new Map([[startKey, 0]]); const came = new Map<string, string | null>([[startKey, null]]);
+  const heuristic = (x: number, y: number) => Math.hypot(x - to.x, y - to.y); let expanded = 0;
+  while (frontier.length && expanded++ < 100000) {
+    const current = frontier.pop()!; const currentKey = key(current.x, current.y); if (currentKey === targetKey) break;
+    for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) {
+      if (!dx && !dy) continue; const x = current.x + dx; const y = current.y + dy; if (x < minX || x > maxX || y < minY || y > maxY) continue;
+      const tile = getTile(x, y); if (!tile.walkable && tile.terrain !== 'river') continue;
+      const nextKey = key(x, y); const step = (dx && dy ? Math.SQRT2 : 1) * (tile.terrain === 'river' ? 1.5 : Math.max(1, tile.movementCost)); const nextCost = (cost.get(currentKey) ?? Infinity) + step;
+      if (nextCost < (cost.get(nextKey) ?? Infinity)) { cost.set(nextKey, nextCost); came.set(nextKey, currentKey); frontier.push({ x, y, score: nextCost + heuristic(x, y) }); }
+    }
+  }
+  if (!came.has(targetKey)) return [];
+  const result: WorldCoordinate[] = []; let cursor: string | null = targetKey; while (cursor) { const [x, y] = cursor.split(',').map(Number); result.unshift({ x, y }); cursor = came.get(cursor) ?? null; }
+  return result;
+}
+
 function importance(a: RoadNode, b: RoadNode): RoadImportance { const value = Math.max(a.importance, b.importance); return value > 0.78 ? 'highway' : value > 0.5 ? 'road' : 'trail'; }
 function widthFor(value: RoadImportance) { return value === 'highway' ? 4 : value === 'road' ? 2.5 : 1.4; }
 function bridgeGroups(config: WorldConfig, path: WorldCoordinate[], roadId: string, width: number): Bridge[] { const bridges: Bridge[] = []; let current: WorldCoordinate[] = []; const flush = () => { if (!current.length) return; bridges.push({ id: `${roadId}:bridge:${bridges.length}`, roadId, tiles: current, points: current.map((tile) => ({ x: tile.x + 0.5, y: tile.y + 0.5 })), width }); current = []; }; for (const tile of path) { if (tileAtConfig(config, tile.x, tile.y).terrain === 'river') current.push(tile); else flush(); } flush(); return bridges; }
@@ -89,6 +110,38 @@ function splitSegment(parentId: string, from: RoadNode, to: RoadNode, path: Worl
   const flush = () => { if (!currentRegion || current.length < 2) return; const kind = importance(from, to); const id = `${parentId}:piece:${regionKey(currentRegion)}`; pieces.push({ id, parentId, ownerRegion: currentRegion, from, to, importance: kind, width: widthFor(kind), tiles: current, points: smooth(current), bridges: bridgeGroups(config, current, id, widthFor(kind)) }); };
   for (const point of path) { const region = worldToRegion(point.x, point.y); if (!currentRegion || region.rx !== currentRegion.rx || region.ry !== currentRegion.ry) { flush(); currentRegion = region; current = current.length ? [current.at(-1)!, point] : [point]; } else current.push(point); }
   flush(); return pieces;
+}
+
+/** Builds the deterministic route from the player spawn to the nearest
+ * settlement gate represented by the supplied regions. */
+export function generateStarterRoad(config: WorldConfig, startPoint: WorldCoordinate, regions: RegionData[]): RoadSegment[] {
+  const candidates = regions.flatMap((region) => region.settlements.flatMap((settlement) => settlement.accessPoints.map((gate) => ({ settlement, gate }))));
+  candidates.sort((a, b) => distance(startPoint, a.settlement) - distance(startPoint, b.settlement) || a.settlement.id.localeCompare(b.settlement.id) || distance(startPoint, a.gate) - distance(startPoint, b.gate) || a.gate.id.localeCompare(b.gate.id));
+  const terrainCache = new Map<string, { fields: ReturnType<typeof fieldsAt>; waterBody: string }>();
+  const tileCache = new Map<string, ReturnType<typeof tileAtConfig>>();
+  const source: RoadNode = { id: `${config.seed}:v${config.version}:player-start:${startPoint.x},${startPoint.y}`, ownerId: `${config.seed}:v${config.version}:player-start`, x: startPoint.x, y: startPoint.y, kind: 'player-start', importance: 0.72 };
+  const cell = roadGraphCell(worldToRegion(startPoint.x, startPoint.y).rx, worldToRegion(startPoint.x, startPoint.y).ry);
+  for (const candidate of candidates) {
+    const gatePoint = (() => {
+      const direct = tileAtConfig(config, candidate.gate.x, candidate.gate.y);
+      if (direct.walkable || direct.terrain === 'river') return { x: candidate.gate.x, y: candidate.gate.y };
+      const nearby: WorldCoordinate[] = [];
+      for (let radius = 1; radius <= 6; radius++) for (let y = candidate.gate.y - radius; y <= candidate.gate.y + radius; y++) for (let x = candidate.gate.x - radius; x <= candidate.gate.x + radius; x++) {
+        if (Math.max(Math.abs(x - candidate.gate.x), Math.abs(y - candidate.gate.y)) !== radius) continue;
+        const tile = tileAtConfig(config, x, y); if (tile.walkable || tile.terrain === 'river') nearby.push({ x, y });
+      }
+      nearby.sort((a, b) => distance(a, candidate.gate) - distance(b, candidate.gate) || a.y - b.y || a.x - b.x);
+      return nearby[0];
+    })();
+    if (!gatePoint) continue;
+    const gate: RoadNode = { id: candidate.gate.id, ownerId: candidate.settlement.id, x: gatePoint.x, y: gatePoint.y, kind: 'settlement-gate', importance: candidate.gate.importance };
+    const coarse = coarseRoute(config, source, gate, cell, new Set(), terrainCache, tileCache);
+    const path = coarse.length > 1 ? coarse : starterTileRoute(config, source, gate);
+    if (path.length < 2) continue;
+    const parentId = `${config.seed}:v${config.version}:starter-road:${source.x},${source.y}:${candidate.settlement.id}`;
+    return splitSegment(parentId, source, gate, path, config).sort((a, b) => a.id.localeCompare(b.id));
+  }
+  return [];
 }
 
 export function generateRoadCell(config: WorldConfig, regions: RegionData[], gx: number, gy: number) {
