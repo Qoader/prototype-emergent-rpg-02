@@ -3,7 +3,7 @@
 export const TILE_SIZE = 40;
 export const CHUNK_SIZE = 24;
 export const REGION_CHUNK_SIZE = 16;
-export const GENERATOR_VERSION = 3;
+export const GENERATOR_VERSION = 4;
 // Rare points of interest should stay special even across large explored areas.
 const SHRINE_DETAIL_THRESHOLD = 0.998;
 const RUIN_DETAIL_THRESHOLD = 0.99;
@@ -69,7 +69,11 @@ export function tileAt(seed: string, x: number, y: number): Tile { return tileAt
 
 export function tileAtConfig(config: WorldConfig, x: number, y: number): Tile {
   if (config.version !== GENERATOR_VERSION) throw new Error(`Unsupported world generator version: ${config.version}`);
-  const fields = fieldsAt(config, x, y); const hydrology = hydrologyAt(config, x, y); const starter = Math.hypot(x, y) <= 2;
+  const fields = fieldsAt(config, x, y); const hydrology = hydrologyAt(config, x, y, fields); return tileFromFields(config, x, y, fields, hydrology);
+}
+
+function tileFromFields(config: WorldConfig, x: number, y: number, fields: ReturnType<typeof fieldsAt>, hydrology: Hydrology): Tile {
+  const starter = Math.hypot(x, y) <= 2;
   let terrain: Terrain;
   if (starter) terrain = 'starter-ground';
   else if (hydrology.waterBody === 'ocean' || hydrology.waterBody === 'lake') terrain = fields.elevation < 0.22 ? 'deep-water' : 'shallow-water';
@@ -100,7 +104,10 @@ export function classifyBiome(fields: ReturnType<typeof fieldsAt>, terrain: Terr
 export function chunkAt(config: WorldConfig, cx: number, cy: number): WorldChunk {
   assertInteger(cx, 'cx'); assertInteger(cy, 'cy');
   const tiles: Tile[] = [];
-  for (let y = 0; y < CHUNK_SIZE; y++) for (let x = 0; x < CHUNK_SIZE; x++) tiles.push(tileAtConfig(config, cx * CHUNK_SIZE + x, cy * CHUNK_SIZE + y));
+  const flowCache = new Map<string, import('./hydrology').Direction | null>();
+  for (let y = 0; y < CHUNK_SIZE; y++) for (let x = 0; x < CHUNK_SIZE; x++) {
+    const worldX = cx * CHUNK_SIZE + x; const worldY = cy * CHUNK_SIZE + y; const fields = fieldsAt(config, worldX, worldY); const hydrology = hydrologyAt(config, worldX, worldY, fields, flowCache); tiles.push(tileFromFields(config, worldX, worldY, fields, hydrology));
+  }
   return { cx, cy, tiles, settlements: [], settlementLayouts: [], landmarks: [], resources: [], roadEndpoints: [], roads: [] };
 }
 export function key(x: number, y: number) { return `${x},${y}`; }

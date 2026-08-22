@@ -13,20 +13,28 @@ export interface SettlementEdgeFeature { id: string; type: 'garden' | 'field' | 
 export interface SettlementLayout { settlementId: string; bounds: RegionBounds; streets: SettlementStreet[]; buildings: Building[]; districts: District[]; edgeFeatures: SettlementEdgeFeature[]; }
 
 interface SearchNode { x: number; y: number; score: number; }
+class SearchHeap {
+  private values: SearchNode[] = [];
+  get length() { return this.values.length; }
+  push(value: SearchNode) { this.values.push(value); let index = this.values.length - 1; while (index > 0) { const parent = Math.floor((index - 1) / 2); if (this.compare(this.values[parent], value) <= 0) break; this.values[index] = this.values[parent]; index = parent; } this.values[index] = value; }
+  pop() { if (!this.values.length) return undefined; const result = this.values[0]; const last = this.values.pop()!; if (this.values.length) { let index = 0; while (true) { const left = index * 2 + 1; if (left >= this.values.length) break; const right = left + 1; const child = right < this.values.length && this.compare(this.values[right], this.values[left]) < 0 ? right : left; if (this.compare(this.values[child], last) >= 0) break; this.values[index] = this.values[child]; index = child; } this.values[index] = last; } return result; }
+  private compare(a: SearchNode, b: SearchNode) { return a.score - b.score || key(a.x, a.y).localeCompare(key(b.x, b.y)); }
+}
 const DIRECTIONS = [[1, 0], [0, 1], [-1, 0], [0, -1]] as const;
 
 function key(x: number, y: number) { return `${x},${y}`; }
 function distance(a: WorldCoordinate, b: WorldCoordinate) { return Math.hypot(a.x - b.x, a.y - b.y); }
 function buildableLand(config: WorldConfig, x: number, y: number) { const fields = fieldsAt(config, x, y); return fields.elevation >= 0.28 && fields.elevation <= 0.76 && fields.slope <= 0.14 && hydrologyAt(config, x, y).waterBody === 'none'; }
 function boundsFor(shell: SettlementShell): RegionBounds { const fringe = shell.type === 'city' ? 34 : shell.type === 'town' ? 28 : shell.type === 'village' ? 22 : 15; const radius = shell.radius + fringe; return { minX: Math.floor(shell.x - radius), minY: Math.floor(shell.y - radius), maxX: Math.ceil(shell.x + radius), maxY: Math.ceil(shell.y + radius) }; }
+export function settlementLayoutBounds(shell: SettlementShell) { return boundsFor(shell); }
 function inBounds(point: WorldCoordinate, bounds: RegionBounds) { return point.x >= bounds.minX && point.x <= bounds.maxX && point.y >= bounds.minY && point.y <= bounds.maxY; }
 function stablePoints(points: WorldCoordinate[]) { return points.filter((point, index) => index === 0 || point.x !== points[index - 1].x || point.y !== points[index - 1].y); }
 
 function route(config: WorldConfig, shell: SettlementShell, start: WorldCoordinate, target: WorldCoordinate, existing: Set<string>, fieldCache: Map<string, GeographicFields>) {
-  const bounds = boundsFor(shell); const frontier: SearchNode[] = [{ ...start, score: 0 }]; const cost = new Map<string, number>([[key(start.x, start.y), 0]]); const cameFrom = new Map<string, string | null>([[key(start.x, start.y), null]]);
+  const bounds = boundsFor(shell); const frontier = new SearchHeap(); frontier.push({ ...start, score: 0 }); const cost = new Map<string, number>([[key(start.x, start.y), 0]]); const cameFrom = new Map<string, string | null>([[key(start.x, start.y), null]]);
   const fieldsAtPoint = (x: number, y: number) => { const cacheKey = key(x, y); const cached = fieldCache.get(cacheKey); if (cached) return cached; const fields = fieldsAt(config, x, y); fieldCache.set(cacheKey, fields); return fields; };
   while (frontier.length) {
-    frontier.sort((a, b) => a.score - b.score || key(a.x, a.y).localeCompare(key(b.x, b.y))); const current = frontier.shift()!;
+    const current = frontier.pop()!;
     if (current.x === target.x && current.y === target.y) break;
     for (const [dx, dy] of DIRECTIONS) {
       const x = current.x + dx; const y = current.y + dy; if (!inBounds({ x, y }, bounds)) continue;
@@ -74,4 +82,4 @@ export function generateSettlementLayout(config: WorldConfig, shell: SettlementS
   return { settlementId: shell.id, bounds, streets: streets.sort((a, b) => a.id.localeCompare(b.id)), buildings: buildings.sort((a, b) => a.id.localeCompare(b.id)), districts: districts.sort((a, b) => a.id.localeCompare(b.id)), edgeFeatures: edgeFeatures.sort((a, b) => a.id.localeCompare(b.id)) };
 }
 
-export function layoutIntersectsBounds(layout: SettlementLayout, bounds: RegionBounds) { return layout.bounds.maxX >= bounds.minX && layout.bounds.minX <= bounds.maxX && layout.bounds.maxY >= bounds.minY && layout.bounds.minY <= bounds.maxY; }
+export function layoutIntersectsBounds(layout: Pick<SettlementLayout, 'bounds'>, bounds: RegionBounds) { return layout.bounds.maxX >= bounds.minX && layout.bounds.minX <= bounds.maxX && layout.bounds.maxY >= bounds.minY && layout.bounds.minY <= bounds.maxY; }

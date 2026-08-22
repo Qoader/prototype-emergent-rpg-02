@@ -64,9 +64,14 @@ function riverFlowAt(config: WorldConfig, targetX: number, targetY: number) {
   return null;
 }
 
-export function hydrologyAt(config: WorldConfig, x: number, y: number): Hydrology {
-  const fields = fieldsAt(config, x, y); const baseWater = waterBodyAt(config, fields, x, y);
-  const flowDirection = baseWater === 'none' ? riverFlowAt(config, x, y) : null;
+export function hydrologyAt(config: WorldConfig, x: number, y: number, knownFields?: GeographicFields, flowCache?: Map<string, Direction | null>): Hydrology {
+  const fields = knownFields ?? fieldsAt(config, x, y); const baseWater = waterBodyAt(config, fields, x, y);
+  const flowKey = `${Math.floor(x / HYDROLOGY_CELL_SIZE)},${Math.floor(y / HYDROLOGY_CELL_SIZE)}`;
+  let flowDirection: Direction | null = null;
+  if (baseWater === 'none') {
+    if (flowCache?.has(flowKey)) flowDirection = flowCache.get(flowKey) ?? null;
+    else { flowDirection = riverFlowAt(config, x, y); flowCache?.set(flowKey, flowDirection); }
+  }
   const waterBody: WaterBody = flowDirection ? 'river' : baseWater;
   let shoreline = false;
   if (waterBody === 'none' || waterBody === 'river') for (const point of DIRECTIONS.filter((entry) => entry.dx === 0 || entry.dy === 0)) {

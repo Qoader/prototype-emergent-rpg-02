@@ -11,22 +11,22 @@ describe('continuous geographic fields', () => {
     expect(fieldsAt(config, 11, -8)).not.toEqual(fieldsAt(createWorldConfig('OTHER'), 11, -8));
   });
 
-  it('keeps fixed field fixtures stable for version 3', () => {
+  it('keeps fixed field fixtures stable for version 4', () => {
     expect(fieldsAt(config, 11, -8)).toEqual({
-      elevation: 0.6705709158138613,
-      moisture: 0.6190582635166334,
-      temperature: 0.5337628723793557,
-      fertility: 0.47699040346892435,
-      roughness: 0.5154756317007549,
-      slope: 0.005280944856755232,
+      elevation: 0.3706711692560402,
+      moisture: 0.5607803049793718,
+      temperature: 0.7007261676378648,
+      fertility: 0.47968406057885016,
+      roughness: 0.3131165889444305,
+      slope: 0.01204763066789516,
     });
     expect(fieldsAt(config, -241, -385)).toEqual({
-      elevation: 0.21363899716755697,
-      moisture: 0.486842493423967,
-      temperature: 0.8023841379680958,
-      fertility: 0.4828890922000655,
-      roughness: 0.20206998885734523,
-      slope: 0.023026690883589523,
+      elevation: 0.5352351521296279,
+      moisture: 0.4721819751463354,
+      temperature: 0.6493996030786704,
+      fertility: 0.6067616381949876,
+      roughness: 0.3314090007462411,
+      slope: 0.011430409920998641,
     });
   });
 

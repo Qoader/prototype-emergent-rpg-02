@@ -20,6 +20,13 @@ function graphCell(rx: number, ry: number) { return { gx: Math.floor(rx / ROAD_G
 export function roadGraphCell(rx: number, ry: number) { return graphCell(rx, ry); }
 function distance(a: WorldCoordinate, b: WorldCoordinate) { return Math.hypot(a.x - b.x, a.y - b.y); }
 function stablePath(path: WorldCoordinate[]) { return path.filter((point, index) => index === 0 || point.x !== path[index - 1].x || point.y !== path[index - 1].y); }
+class RouteHeap {
+  private values: Array<{ x: number; y: number; score: number }> = [];
+  get length() { return this.values.length; }
+  push(value: { x: number; y: number; score: number }) { this.values.push(value); let index = this.values.length - 1; while (index > 0) { const parent = Math.floor((index - 1) / 2); if (this.compare(this.values[parent], value) <= 0) break; this.values[index] = this.values[parent]; index = parent; } this.values[index] = value; }
+  pop() { if (!this.values.length) return undefined; const result = this.values[0]; const last = this.values.pop()!; if (this.values.length) { let index = 0; while (true) { const left = index * 2 + 1; if (left >= this.values.length) break; const right = left + 1; const child = right < this.values.length && this.compare(this.values[right], this.values[left]) < 0 ? right : left; if (this.compare(this.values[child], last) >= 0) break; this.values[index] = this.values[child]; index = child; } this.values[index] = last; } return result; }
+  private compare(a: { x: number; y: number; score: number }, b: { x: number; y: number; score: number }) { return a.score - b.score || `${a.x},${a.y}`.localeCompare(`${b.x},${b.y}`); }
+}
 
 function candidateEdges(nodes: RoadNode[]) {
   const edges: Array<{ a: RoadNode; b: RoadNode; distance: number }> = [];
@@ -42,9 +49,9 @@ function selectEdges(config: WorldConfig, nodes: RoadNode[], cell: { gx: number;
 function coarseRoute(config: WorldConfig, from: RoadNode, to: RoadNode, cell: { gx: number; gy: number }) {
   const start = { x: Math.floor(from.x / COARSE_CELL_SIZE), y: Math.floor(from.y / COARSE_CELL_SIZE) }; const target = { x: Math.floor(to.x / COARSE_CELL_SIZE), y: Math.floor(to.y / COARSE_CELL_SIZE) };
   const margin = 6; const minX = Math.min(start.x, target.x) - margin; const maxX = Math.max(start.x, target.x) + margin; const minY = Math.min(start.y, target.y) - margin; const maxY = Math.max(start.y, target.y) + margin;
-  const key = (x: number, y: number) => `${x},${y}`; const frontier = [{ ...start, score: 0 }]; const cost = new Map([[key(start.x, start.y), 0]]); const came = new Map<string, string | null>([[key(start.x, start.y), null]]);
+  const key = (x: number, y: number) => `${x},${y}`; const frontier = new RouteHeap(); frontier.push({ ...start, score: 0 }); const cost = new Map([[key(start.x, start.y), 0]]); const came = new Map<string, string | null>([[key(start.x, start.y), null]]);
   let expandedNodes = 0; while (frontier.length && expandedNodes++ < 500) {
-    frontier.sort((a, b) => a.score - b.score || key(a.x, a.y).localeCompare(key(b.x, b.y))); const current = frontier.shift()!; if (current.x === target.x && current.y === target.y) break;
+    const current = frontier.pop()!; if (current.x === target.x && current.y === target.y) break;
     for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]] as const) {
       const x = current.x + dx; const y = current.y + dy; if (x < minX || x > maxX || y < minY || y > maxY) continue;
       const wx = x * COARSE_CELL_SIZE + Math.floor(COARSE_CELL_SIZE / 2); const wy = y * COARSE_CELL_SIZE + Math.floor(COARSE_CELL_SIZE / 2); const fields = fieldsAt(config, wx, wy);

@@ -8,7 +8,7 @@ describe('procedural Emberwild', () => {
   });
   it('provides deterministic namespaced random access', () => {
     const config = createWorldConfig('EMBERWILD-01');
-    expect(random(config, 'settlement', 12, -4)).toBe(0.679822172736749);
+    expect(random(config, 'settlement', 12, -4)).toBe(0.6780221210792661);
     expect(random(config, 'settlement', 12, -4)).toBe(random(config, 'settlement', 12, -4));
     expect(random(config, 'settlement', 12, -4)).not.toBe(random(config, 'road', 12, -4));
     expect(random(config, 'settlement', 12, -4)).not.toBe(random(createWorldConfig('OTHER'), 'settlement', 12, -4));
@@ -23,9 +23,9 @@ describe('procedural Emberwild', () => {
   });
   it('creates versioned stable chunk, region, and feature identities', () => {
     const config = createWorldConfig('EMBERWILD-01');
-    expect(chunkKey({ ...config, cx: 2, cy: -3 })).toBe('EMBERWILD-01:v3:chunk:2,-3');
-    expect(regionKey({ ...config, rx: -2, ry: 3 })).toBe('EMBERWILD-01:v3:region:-2,3');
-    expect(featureId(config, 'settlement', 12, -4)).toBe('EMBERWILD-01:v3:settlement:12,-4');
+    expect(chunkKey({ ...config, cx: 2, cy: -3 })).toBe('EMBERWILD-01:v4:chunk:2,-3');
+    expect(regionKey({ ...config, rx: -2, ry: 3 })).toBe('EMBERWILD-01:v4:region:-2,3');
+    expect(featureId(config, 'settlement', 12, -4)).toBe('EMBERWILD-01:v4:settlement:12,-4');
   });
   it('regenerates identical chunk data regardless of request order', () => {
     const config = createWorldConfig('EMBERWILD-01');
