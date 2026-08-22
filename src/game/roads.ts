@@ -1,13 +1,14 @@
 import { fieldsAt } from './fields';
+import { hydrologyAt } from './hydrology';
 import type { RegionData, RoadEndpoint } from './regions';
 import { REGION_SIZE_TILES } from './regions';
 import { key, random, tileAtConfig, worldToRegion, type RegionCoordinate, type WorldConfig, type WorldCoordinate } from './world';
 import type { WorldPoint } from './settlements';
 
-export const ROAD_NETWORK_VERSION = 2;
+export const ROAD_NETWORK_VERSION = 3;
 export const ROAD_GRAPH_REGION_SIZE = 4;
-const COARSE_CELL_SIZE = 8;
-const MAX_NEIGHBORS = 3;
+const COARSE_CELL_SIZE = 16;
+const MAX_NEIGHBORS = 4;
 
 export type RoadImportance = 'trail' | 'road' | 'highway';
 export interface RoadNode { id: string; ownerId: string; x: number; y: number; kind: RoadEndpoint['kind'] | 'junction'; importance: number; }
@@ -31,7 +32,8 @@ class RouteHeap {
 function candidateEdges(nodes: RoadNode[]) {
   const edges: Array<{ a: RoadNode; b: RoadNode; distance: number }> = [];
   for (const node of nodes) {
-    nodes.filter((other) => other.id !== node.id && other.ownerId !== node.ownerId).map((other) => ({ a: node, b: other, distance: distance(node, other) })).sort((a, b) => a.distance - b.distance || a.b.id.localeCompare(b.b.id)).slice(0, MAX_NEIGHBORS).forEach((edge) => edges.push(edge));
+    const limit = node.kind === 'region-border' ? 1 : MAX_NEIGHBORS;
+    nodes.filter((other) => other.id !== node.id && other.ownerId !== node.ownerId).map((other) => ({ a: node, b: other, distance: distance(node, other) })).sort((a, b) => a.distance - b.distance || a.b.id.localeCompare(b.b.id)).slice(0, limit).forEach((edge) => edges.push(edge));
   }
   return [...new Map(edges.map((edge) => { const ids = [edge.a.id, edge.b.id].sort(); return [`${ids[0]}|${ids[1]}`, { ...edge, a: nodes.find((node) => node.id === ids[0])!, b: nodes.find((node) => node.id === ids[1])! }]; })).values()].sort((a, b) => a.distance - b.distance || `${a.a.id}|${a.b.id}`.localeCompare(`${b.a.id}|${b.b.id}`));
 }
@@ -46,17 +48,24 @@ function selectEdges(config: WorldConfig, nodes: RoadNode[], cell: { gx: number;
   return selected;
 }
 
-function coarseRoute(config: WorldConfig, from: RoadNode, to: RoadNode, cell: { gx: number; gy: number }, claimedRoadTiles: Set<string>) {
+function coarseRoute(config: WorldConfig, from: RoadNode, to: RoadNode, cell: { gx: number; gy: number }, claimedRoadTiles: Set<string>, terrainCache: Map<string, { fields: ReturnType<typeof fieldsAt>; waterBody: string }>, tileCache: Map<string, ReturnType<typeof tileAtConfig>>) {
   const start = { x: Math.floor(from.x / COARSE_CELL_SIZE), y: Math.floor(from.y / COARSE_CELL_SIZE) }; const target = { x: Math.floor(to.x / COARSE_CELL_SIZE), y: Math.floor(to.y / COARSE_CELL_SIZE) };
   const margin = 6; const minX = Math.min(start.x, target.x) - margin; const maxX = Math.max(start.x, target.x) + margin; const minY = Math.min(start.y, target.y) - margin; const maxY = Math.max(start.y, target.y) + margin;
   const key = (x: number, y: number) => `${x},${y}`; const frontier = new RouteHeap(); frontier.push({ ...start, score: 0 }); const cost = new Map([[key(start.x, start.y), 0]]); const came = new Map<string, string | null>([[key(start.x, start.y), null]]);
-  let expandedNodes = 0; while (frontier.length && expandedNodes++ < 500) {
+  const span = Math.max(maxX - minX + 1, maxY - minY + 1);
+  // Keep cold generation bounded. Long routes are retried through the
+  // neighbouring settlement/portal candidates rather than monopolising the
+  // worker on a single blocked search.
+  const expansionBudget = Math.min(2400, Math.max(360, Math.ceil(span * span * 0.08)));
+  let expandedNodes = 0; while (frontier.length && expandedNodes++ < expansionBudget) {
     const current = frontier.pop()!; if (current.x === target.x && current.y === target.y) break;
     for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]] as const) {
       const x = current.x + dx; const y = current.y + dy; if (x < minX || x > maxX || y < minY || y > maxY) continue;
-      const wx = x * COARSE_CELL_SIZE + Math.floor(COARSE_CELL_SIZE / 2); const wy = y * COARSE_CELL_SIZE + Math.floor(COARSE_CELL_SIZE / 2); const fields = fieldsAt(config, wx, wy);
+      const wx = x * COARSE_CELL_SIZE + Math.floor(COARSE_CELL_SIZE / 2); const wy = y * COARSE_CELL_SIZE + Math.floor(COARSE_CELL_SIZE / 2); const terrainKey = `${wx},${wy}`; let sample = terrainCache.get(terrainKey);
+      if (!sample) { const fields = fieldsAt(config, wx, wy); sample = { fields, waterBody: hydrologyAt(config, wx, wy, fields).waterBody }; terrainCache.set(terrainKey, sample); }
+      const fields = sample.fields;
       if (fields.elevation < 0.24 || fields.slope > 0.24) continue;
-      const terrain = tileAtConfig(config, wx, wy).terrain; if (terrain === 'deep-water' || terrain === 'shallow-water' || terrain === 'mountain') continue;
+      if (sample.waterBody === 'ocean' || sample.waterBody === 'lake' || fields.elevation > 0.76 || fields.slope > 0.14) continue;
       const nextKey = key(x, y); const roadPreference = claimedRoadTiles.has(nextKey) ? 0.2 : 1; const nextCost = (cost.get(key(current.x, current.y)) ?? Infinity) + roadPreference + fields.slope * 10 + fields.roughness * 1.8 + random(config, 'road:cost-noise', cell.gx, cell.gy, x, y) * 0.08;
       if (nextCost < (cost.get(nextKey) ?? Infinity)) { cost.set(nextKey, nextCost); came.set(nextKey, key(current.x, current.y)); frontier.push({ x, y, score: nextCost + Math.abs(x - target.x) + Math.abs(y - target.y) }); }
     }
@@ -64,8 +73,9 @@ function coarseRoute(config: WorldConfig, from: RoadNode, to: RoadNode, cell: { 
   const result: WorldCoordinate[] = []; let cursor: string | null = key(target.x, target.y); if (!came.has(cursor)) return [];
   while (cursor) { const [x, y] = cursor.split(',').map(Number); result.unshift({ x: x * COARSE_CELL_SIZE + 4, y: y * COARSE_CELL_SIZE + 4 }); cursor = came.get(cursor) ?? null; }
   const expanded: WorldCoordinate[] = [from, ...result, to];
+  const validTile = (point: WorldCoordinate) => { const tileKey = `${point.x},${point.y}`; let tile = tileCache.get(tileKey); if (!tile) { tile = tileAtConfig(config, point.x, point.y); tileCache.set(tileKey, tile); } return tile.walkable || tile.terrain === 'river'; };
   const path: WorldCoordinate[] = [];
-  for (let index = 0; index < expanded.length - 1; index++) { const a = expanded[index]; const b = expanded[index + 1]; const steps = Math.max(Math.abs(b.x - a.x), Math.abs(b.y - a.y)); for (let step = 0; step <= steps; step++) { const point = { x: Math.round(a.x + (b.x - a.x) * step / Math.max(1, steps)), y: Math.round(a.y + (b.y - a.y) * step / Math.max(1, steps)) }; const tile = tileAtConfig(config, point.x, point.y); if (!tile.walkable && tile.terrain !== 'river') return []; path.push(point); } }
+  for (let index = 0; index < expanded.length - 1; index++) { const a = expanded[index]; const b = expanded[index + 1]; const steps = Math.max(Math.abs(b.x - a.x), Math.abs(b.y - a.y)); for (let step = 0; step <= steps; step++) { const point = { x: Math.round(a.x + (b.x - a.x) * step / Math.max(1, steps)), y: Math.round(a.y + (b.y - a.y) * step / Math.max(1, steps)) }; if (!validTile(point)) return []; path.push(point); } }
   return stablePath(path);
 }
 
@@ -82,12 +92,47 @@ function splitSegment(parentId: string, from: RoadNode, to: RoadNode, path: Worl
 }
 
 export function generateRoadCell(config: WorldConfig, regions: RegionData[], gx: number, gy: number) {
-  const cell = { gx, gy }; const nodeMap = new Map<string, RoadNode>(); for (const region of regions) for (const endpoint of region.roadEndpoints) nodeMap.set(endpoint.ownerId, { id: endpoint.id, ownerId: endpoint.ownerId, x: endpoint.x, y: endpoint.y, kind: endpoint.kind, importance: endpoint.importance });
-  const center = { x: (cell.gx * ROAD_GRAPH_REGION_SIZE + 2) * REGION_SIZE_TILES, y: (cell.gy * ROAD_GRAPH_REGION_SIZE + 2) * REGION_SIZE_TILES }; const nodes = [...nodeMap.values()].sort((a, b) => distance(a, center) - distance(b, center) || b.importance - a.importance || a.id.localeCompare(b.id)).slice(0, 3).sort((a, b) => a.id.localeCompare(b.id)); const segments: RoadSegment[] = []; const claimed = new Map<string, RoadNode>();
+  const cell = { gx, gy }; const nodeMap = new Map<string, RoadNode>(); const terrainCache = new Map<string, { fields: ReturnType<typeof fieldsAt>; waterBody: string }>(); const tileCache = new Map<string, ReturnType<typeof tileAtConfig>>();
+  // Settlements are the backbone graph. Landmarks and resources remain
+  // optional future spurs and must not multiply the expensive long routes.
+  for (const region of regions) for (const settlement of region.settlements) {
+    const endpoint = [...settlement.accessPoints].sort((a, b) => a.id.localeCompare(b.id))[0];
+    if (endpoint) nodeMap.set(settlement.id, { id: endpoint.id, ownerId: settlement.id, x: endpoint.x, y: endpoint.y, kind: endpoint.kind, importance: endpoint.importance });
+  }
+  const cellSize = ROAD_GRAPH_REGION_SIZE * REGION_SIZE_TILES;
+  const minX = gx * cellSize; const minY = gy * cellSize; const maxX = minX + cellSize - 1; const maxY = minY + cellSize - 1;
+  const portal = (side: 'north' | 'east' | 'south' | 'west'): RoadNode => {
+    const horizontal = side === 'north' || side === 'south';
+    const edgeX = horizontal ? gx : side === 'east' ? gx + 1 : gx;
+    const edgeY = horizontal ? side === 'south' ? gy + 1 : gy : gy;
+    const axis = horizontal ? 'h' : 'v';
+    const offset = 16 + Math.floor(random(config, 'road:portal-offset', axis, edgeX, edgeY) * Math.max(1, cellSize - 32));
+    const point = side === 'north' ? { x: minX + offset, y: minY } : side === 'east' ? { x: maxX, y: minY + offset } : side === 'south' ? { x: minX + offset, y: maxY } : { x: minX, y: minY + offset };
+    const id = `${config.seed}:v${config.version}:road-portal:${axis}:${edgeX},${edgeY}`;
+    return { id, ownerId: id, x: point.x, y: point.y, kind: 'region-border', importance: 0.72 };
+  };
+  // Portals are part of the settlement backbone only when this cell contains
+  // a settlement. Resource/landmark-only cells stay cheap and do not create
+  // long exploratory corridors with no settlement to serve.
+  if ([...nodeMap.values()].some((node) => node.kind === 'settlement-gate')) {
+    // Keep only portals that are near a settlement in this cell. This avoids
+    // spending the cold-generation budget routing four empty wilderness
+    // corridors while still providing deterministic cross-cell anchors where
+    // the settlement network can actually reach them.
+    const sides = (['north', 'east', 'south', 'west'] as const).map((side) => portal(side));
+    for (const node of sides) if ([...nodeMap.values()].some((other) => other.kind === 'settlement-gate' && distance(node, other) < cellSize * 0.45)) nodeMap.set(node.id, node);
+  }
+  const center = { x: (minX + maxX) / 2, y: (minY + maxY) / 2 };
+  const settlementNodes = [...nodeMap.values()].filter((node) => node.kind === 'settlement-gate').sort((a, b) => distance(a, center) - distance(b, center) || b.importance - a.importance || a.id.localeCompare(b.id));
+  const portalNodes = [...nodeMap.values()].filter((node) => node.kind === 'region-border');
+  // Bound cold-plan work while retaining a deterministic cross-cell backbone.
+  // Additional settlements are still present in RegionData and can be picked
+  // up by a later denser plan tier without changing chunk ownership.
+  const nodes = [...settlementNodes.slice(0, 6), ...portalNodes].sort((a, b) => a.id.localeCompare(b.id)); const segments: RoadSegment[] = []; const claimed = new Map<string, RoadNode>();
   const junctionFor = (point: WorldCoordinate, importanceValue: number) => { const id = `${config.seed}:v${config.version}:road-junction:${cell.gx},${cell.gy}:${point.x},${point.y}`; const existing = claimed.get(key(point.x, point.y)); if (existing?.kind === 'junction') return existing; const node: RoadNode = { id, ownerId: id, x: point.x, y: point.y, kind: 'junction', importance: Math.max(importanceValue, existing?.importance ?? 0) }; claimed.set(key(point.x, point.y), node); return node; };
   for (const edge of selectEdges(config, nodes, cell).sort((a, b) => `${a.a.id}|${a.b.id}`.localeCompare(`${b.a.id}|${b.b.id}`))) {
     const claimedCoarse = new Set([...claimed.keys()].map((value) => { const [x, y] = value.split(',').map(Number); return key(Math.floor(x / COARSE_CELL_SIZE), Math.floor(y / COARSE_CELL_SIZE)); }));
-    const path = coarseRoute(config, edge.a, edge.b, cell, claimedCoarse); if (path.length < 2) continue;
+    const path = coarseRoute(config, edge.a, edge.b, cell, claimedCoarse, terrainCache, tileCache); if (path.length < 2) continue;
     const parentId = `${config.seed}:v${config.version}:road:${edge.a.id}|${edge.b.id}`; let destination = edge.b; let emitted = path;
     for (let index = 1; index < path.length; index++) { const existing = claimed.get(key(path[index].x, path[index].y)); if (!existing) continue; destination = index === path.length - 1 && path[index].x === edge.b.x && path[index].y === edge.b.y ? edge.b : junctionFor(path[index], Math.max(edge.a.importance, edge.b.importance)); emitted = path.slice(0, index + 1); break; }
     if (emitted.length < 2) continue;
