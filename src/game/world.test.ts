@@ -73,6 +73,18 @@ describe('procedural Emberwild', () => {
     expect(path.length).toBeGreaterThan(0);
     expect(path.at(-1)).not.toMatchObject(start);
   });
+  it('can select an impassable destination when it is marked as a road', () => {
+    const seed = 'EMBERWILD-01'; const start = findStartingPosition(createWorldConfig(seed)); const startChunk = worldToChunk(start.x, start.y); let blocked = tileAt(seed, start.x, start.y);
+    const minX = (startChunk.cx - 1) * CHUNK_SIZE; const maxX = (startChunk.cx + 2) * CHUNK_SIZE - 1; const minY = (startChunk.cy - 1) * CHUNK_SIZE; const maxY = (startChunk.cy + 2) * CHUNK_SIZE - 1;
+    for (let y = minY; y <= maxY && blocked.walkable; y++) for (let x = minX; x <= maxX; x++) {
+      const candidate = tileAt(seed, x, y); if (!candidate.walkable && candidate.terrain !== 'mountain') { blocked = candidate; break; }
+    }
+    expect(blocked.walkable).toBe(false);
+    const ordinaryPath = findPath(seed, tileAt(seed, start.x, start.y), blocked);
+    const roadPath = findPath(seed, tileAt(seed, start.x, start.y), blocked, undefined, { roadTileKeys: new Set([`${blocked.x},${blocked.y}`]) });
+    expect(ordinaryPath.at(-1)).not.toMatchObject({ x: blocked.x, y: blocked.y });
+    expect(roadPath.at(-1)).toMatchObject({ x: blocked.x, y: blocked.y });
+  });
 
   it('keeps random-access variation directionally balanced', () => {
     const spatialConfig = createWorldConfig('SPATIAL-TEST');

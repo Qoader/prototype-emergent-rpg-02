@@ -5,7 +5,7 @@ import { REGION_SIZE_TILES } from './regions';
 import { key, random, tileAtConfig, worldToRegion, type RegionCoordinate, type WorldConfig, type WorldCoordinate } from './world';
 import type { WorldPoint } from './settlements';
 
-export const ROAD_NETWORK_VERSION = 7;
+export const ROAD_NETWORK_VERSION = 8;
 export const ROAD_GRAPH_REGION_SIZE = 4;
 const COARSE_CELL_SIZE = 16;
 
@@ -40,7 +40,9 @@ class RouteHeap {
   private compare(a: { x: number; y: number; score: number }, b: { x: number; y: number; score: number }) { return a.score - b.score || `${a.x},${a.y}`.localeCompare(`${b.x},${b.y}`); }
 }
 
-function coarseRoute(config: WorldConfig, from: RoadNode, to: RoadNode, cell: { gx: number; gy: number }, claimedRoadTiles: Set<string>, terrainCache: Map<string, { fields: ReturnType<typeof fieldsAt>; waterBody: string }>, tileCache: Map<string, ReturnType<typeof tileAtConfig>>) {
+type RouteMode = 'preferred' | 'fallback';
+
+function coarseRoute(config: WorldConfig, from: RoadNode, to: RoadNode, cell: { gx: number; gy: number }, claimedRoadTiles: Set<string>, terrainCache: Map<string, { fields: ReturnType<typeof fieldsAt>; waterBody: string }>, tileCache: Map<string, ReturnType<typeof tileAtConfig>>, mode: RouteMode) {
   const start = { x: Math.floor(from.x / COARSE_CELL_SIZE), y: Math.floor(from.y / COARSE_CELL_SIZE) }; const target = { x: Math.floor(to.x / COARSE_CELL_SIZE), y: Math.floor(to.y / COARSE_CELL_SIZE) };
   const margin = 6; const minX = Math.min(start.x, target.x) - margin; const maxX = Math.max(start.x, target.x) + margin; const minY = Math.min(start.y, target.y) - margin; const maxY = Math.max(start.y, target.y) + margin;
   const key = (x: number, y: number) => `${x},${y}`; const frontier = new RouteHeap(); frontier.push({ ...start, score: 0 }); const cost = new Map([[key(start.x, start.y), 0]]); const came = new Map<string, string | null>([[key(start.x, start.y), null]]);
@@ -56,22 +58,31 @@ function coarseRoute(config: WorldConfig, from: RoadNode, to: RoadNode, cell: { 
       const wx = x * COARSE_CELL_SIZE + Math.floor(COARSE_CELL_SIZE / 2); const wy = y * COARSE_CELL_SIZE + Math.floor(COARSE_CELL_SIZE / 2); const terrainKey = `${wx},${wy}`; let sample = terrainCache.get(terrainKey);
       if (!sample) { const fields = fieldsAt(config, wx, wy); sample = { fields, waterBody: hydrologyAt(config, wx, wy, fields).waterBody }; terrainCache.set(terrainKey, sample); }
       const fields = sample.fields;
-      if (fields.elevation < 0.24 || fields.slope > 0.24) continue;
-      if (sample.waterBody === 'ocean' || sample.waterBody === 'lake' || fields.elevation > 0.76 || fields.slope > 0.14) continue;
-      const nextKey = key(x, y); const roadPreference = claimedRoadTiles.has(nextKey) ? 0.2 : 1; const nextCost = (cost.get(key(current.x, current.y)) ?? Infinity) + roadPreference + fields.slope * 10 + fields.roughness * 1.8 + random(config, 'road:cost-noise', cell.gx, cell.gy, x, y) * 0.08;
+      const unsuitable = sample.waterBody !== 'none' || fields.elevation < 0.24 || fields.elevation > 0.76 || fields.slope > 0.14;
+      if (mode === 'preferred' && unsuitable) continue;
+      const waterPenalty = sample.waterBody === 'river' ? 20 : sample.waterBody === 'none' ? 0 : 100;
+      const elevationPenalty = fields.elevation < 0.24 || fields.elevation > 0.76 ? 50 : 0;
+      const slopePenalty = Math.max(0, fields.slope - 0.14) * 80;
+      const terrainPenalty = mode === 'fallback' ? waterPenalty + elevationPenalty + slopePenalty : 0;
+      const nextKey = key(x, y); const roadPreference = claimedRoadTiles.has(nextKey) ? 0.2 : 1; const nextCost = (cost.get(key(current.x, current.y)) ?? Infinity) + roadPreference + fields.slope * 10 + fields.roughness * 1.8 + terrainPenalty + random(config, 'road:cost-noise', cell.gx, cell.gy, x, y) * 0.08;
       if (nextCost < (cost.get(nextKey) ?? Infinity)) { cost.set(nextKey, nextCost); came.set(nextKey, key(current.x, current.y)); frontier.push({ x, y, score: nextCost + Math.abs(x - target.x) + Math.abs(y - target.y) }); }
     }
   }
   const result: WorldCoordinate[] = []; let cursor: string | null = key(target.x, target.y); if (!came.has(cursor)) return [];
   while (cursor) { const [x, y] = cursor.split(',').map(Number); result.unshift({ x: x * COARSE_CELL_SIZE + 4, y: y * COARSE_CELL_SIZE + 4 }); cursor = came.get(cursor) ?? null; }
   const expanded: WorldCoordinate[] = [from, ...result, to];
-  const validTile = (point: WorldCoordinate) => { const tileKey = `${point.x},${point.y}`; let tile = tileCache.get(tileKey); if (!tile) { tile = tileAtConfig(config, point.x, point.y); tileCache.set(tileKey, tile); } return tile.walkable || tile.terrain === 'river'; };
+  const validTile = (point: WorldCoordinate) => { if (mode === 'fallback') return true; const tileKey = `${point.x},${point.y}`; let tile = tileCache.get(tileKey); if (!tile) { tile = tileAtConfig(config, point.x, point.y); tileCache.set(tileKey, tile); } return tile.walkable; };
   const path: WorldCoordinate[] = [];
   for (let index = 0; index < expanded.length - 1; index++) { const a = expanded[index]; const b = expanded[index + 1]; const steps = Math.max(Math.abs(b.x - a.x), Math.abs(b.y - a.y)); for (let step = 0; step <= steps; step++) { const point = { x: Math.round(a.x + (b.x - a.x) * step / Math.max(1, steps)), y: Math.round(a.y + (b.y - a.y) * step / Math.max(1, steps)) }; if (!validTile(point)) return []; path.push(point); } }
   return stablePath(path);
 }
 
-function starterTileRoute(config: WorldConfig, from: RoadNode, to: RoadNode) {
+function coarseRouteWithFallback(config: WorldConfig, from: RoadNode, to: RoadNode, cell: { gx: number; gy: number }, claimedRoadTiles: Set<string>, terrainCache: Map<string, { fields: ReturnType<typeof fieldsAt>; waterBody: string }>, tileCache: Map<string, ReturnType<typeof tileAtConfig>>) {
+  const preferred = coarseRoute(config, from, to, cell, claimedRoadTiles, terrainCache, tileCache, 'preferred');
+  return preferred.length > 1 ? preferred : coarseRoute(config, from, to, cell, claimedRoadTiles, terrainCache, tileCache, 'fallback');
+}
+
+function starterTileRoute(config: WorldConfig, from: RoadNode, to: RoadNode, mode: RouteMode) {
   const minX = Math.min(from.x, to.x) - 20; const maxX = Math.max(from.x, to.x) + 20;
   const minY = Math.min(from.y, to.y) - 20; const maxY = Math.max(from.y, to.y) + 20;
   const targetKey = key(to.x, to.y); const startKey = key(from.x, from.y); const tileCache = new Map<string, ReturnType<typeof tileAtConfig>>();
@@ -82,8 +93,14 @@ function starterTileRoute(config: WorldConfig, from: RoadNode, to: RoadNode) {
     const current = frontier.pop()!; const currentKey = key(current.x, current.y); if (currentKey === targetKey) break;
     for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) {
       if (!dx && !dy) continue; const x = current.x + dx; const y = current.y + dy; if (x < minX || x > maxX || y < minY || y > maxY) continue;
-      const tile = getTile(x, y); if (!tile.walkable && tile.terrain !== 'river') continue;
-      const nextKey = key(x, y); const step = (dx && dy ? Math.SQRT2 : 1) * (tile.terrain === 'river' ? 1.5 : Math.max(1, tile.movementCost)); const nextCost = (cost.get(currentKey) ?? Infinity) + step;
+      const tile = getTile(x, y); if (mode === 'preferred' && !tile.walkable) continue;
+      const fields = fieldsAt(config, x, y);
+      const waterPenalty = tile.hydrology.waterBody === 'river' ? 20 : tile.hydrology.waterBody === 'none' ? 0 : 100;
+      const elevationPenalty = fields.elevation < 0.24 || fields.elevation > 0.76 ? 50 : 0;
+      const slopePenalty = Math.max(0, fields.slope - 0.14) * 80;
+      const terrainPenalty = mode === 'fallback' ? waterPenalty + elevationPenalty + slopePenalty : 0;
+      const baseCost = Number.isFinite(tile.movementCost) ? Math.max(1, tile.movementCost) : 1;
+      const nextKey = key(x, y); const step = (dx && dy ? Math.SQRT2 : 1) * (baseCost + terrainPenalty); const nextCost = (cost.get(currentKey) ?? Infinity) + step;
       if (nextCost < (cost.get(nextKey) ?? Infinity)) { cost.set(nextKey, nextCost); came.set(nextKey, currentKey); frontier.push({ x, y, score: nextCost + heuristic(x, y) }); }
     }
   }
@@ -92,9 +109,14 @@ function starterTileRoute(config: WorldConfig, from: RoadNode, to: RoadNode) {
   return result;
 }
 
+function starterTileRouteWithFallback(config: WorldConfig, from: RoadNode, to: RoadNode) {
+  const preferred = starterTileRoute(config, from, to, 'preferred');
+  return preferred.length > 1 ? preferred : starterTileRoute(config, from, to, 'fallback');
+}
+
 function importance(a: RoadNode, b: RoadNode): RoadImportance { const value = Math.max(a.importance, b.importance); return value > 0.78 ? 'highway' : value > 0.5 ? 'road' : 'trail'; }
 function widthFor(value: RoadImportance) { return value === 'highway' ? 4 : value === 'road' ? 2.5 : 1.4; }
-function bridgeGroups(config: WorldConfig, path: WorldCoordinate[], roadId: string, width: number): Bridge[] { const bridges: Bridge[] = []; let current: WorldCoordinate[] = []; const flush = () => { if (!current.length) return; bridges.push({ id: `${roadId}:bridge:${bridges.length}`, roadId, tiles: current, points: current.map((tile) => ({ x: tile.x + 0.5, y: tile.y + 0.5 })), width }); current = []; }; for (const tile of path) { if (tileAtConfig(config, tile.x, tile.y).terrain === 'river') current.push(tile); else flush(); } flush(); return bridges; }
+function bridgeGroups(config: WorldConfig, path: WorldCoordinate[], roadId: string, width: number): Bridge[] { const bridges: Bridge[] = []; let current: WorldCoordinate[] = []; const flush = () => { if (!current.length) return; bridges.push({ id: `${roadId}:bridge:${bridges.length}`, roadId, tiles: current, points: current.map((tile) => ({ x: tile.x + 0.5, y: tile.y + 0.5 })), width }); current = []; }; for (const tile of path) { const terrain = tileAtConfig(config, tile.x, tile.y).terrain; if (terrain === 'river' || terrain === 'shallow-water' || terrain === 'deep-water') current.push(tile); else flush(); } flush(); return bridges; }
 function smooth(path: WorldCoordinate[]) { return path.map((point, index) => ({ x: point.x + 0.5 + (index > 0 && index < path.length - 1 ? 0.08 * Math.sin(index * 2.3) : 0), y: point.y + 0.5 + (index > 0 && index < path.length - 1 ? 0.08 * Math.cos(index * 1.7) : 0) })); }
 
 function splitSegment(parentId: string, from: RoadNode, to: RoadNode, path: WorldCoordinate[], config: WorldConfig): RoadSegment[] {
@@ -113,22 +135,9 @@ export function generateStarterRoad(config: WorldConfig, startPoint: WorldCoordi
   const source: RoadNode = { id: `${config.seed}:v${config.version}:player-start:${startPoint.x},${startPoint.y}`, ownerId: `${config.seed}:v${config.version}:player-start`, x: startPoint.x, y: startPoint.y, kind: 'player-start', importance: 0.72 };
   const cell = roadGraphCell(worldToRegion(startPoint.x, startPoint.y).rx, worldToRegion(startPoint.x, startPoint.y).ry);
   const routeTo = (destination: RoadNode) => {
-    const direct = tileAtConfig(config, destination.x, destination.y);
-    const gatePoint = (() => {
-      if (direct.walkable || direct.terrain === 'river') return { x: destination.x, y: destination.y };
-      const nearby: WorldCoordinate[] = [];
-      for (let radius = 1; radius <= 6; radius++) for (let y = destination.y - radius; y <= destination.y + radius; y++) for (let x = destination.x - radius; x <= destination.x + radius; x++) {
-        if (Math.max(Math.abs(x - destination.x), Math.abs(y - destination.y)) !== radius) continue;
-        const tile = tileAtConfig(config, x, y); if (tile.walkable || tile.terrain === 'river') nearby.push({ x, y });
-      }
-      nearby.sort((a, b) => distance(a, destination) - distance(b, destination) || a.y - b.y || a.x - b.x);
-      return nearby[0];
-    })();
-    if (!gatePoint) return undefined;
-    const adjusted = { ...destination, x: gatePoint.x, y: gatePoint.y };
-    const coarse = coarseRoute(config, source, adjusted, cell, new Set(), terrainCache, tileCache);
-    const path = coarse.length > 1 ? coarse : starterTileRoute(config, source, adjusted);
-    return path.length > 1 ? { destination: adjusted, path } : undefined;
+    const path = coarseRouteWithFallback(config, source, destination, cell, new Set(), terrainCache, tileCache);
+    const finalPath = path.length > 1 ? path : starterTileRouteWithFallback(config, source, destination);
+    return finalPath.length > 1 ? { destination, path: finalPath } : undefined;
   };
   const reachable: Array<{ settlementId: string; destination: RoadNode; path: WorldCoordinate[] }> = [];
   for (const settlement of settlementCandidates) {
@@ -240,7 +249,7 @@ export function generateRoadCell(config: WorldConfig, regions: RegionData[], gx:
     });
     if (!eligible.length) break;
     const candidate = eligible[0]; const candidateId = `${candidate.from.id}|${candidate.to.id}`; attempted.add(candidateId);
-    const path = coarseRoute(config, candidate.from, candidate.to, cell, claimedCoarse, terrainCache, tileCache);
+    const path = coarseRouteWithFallback(config, candidate.from, candidate.to, cell, claimedCoarse, terrainCache, tileCache);
     if (path.length < 2 || !union(candidate.from.id, candidate.to.id)) continue;
     planned.push({ from: candidate.from, to: candidate.to, path });
     recordEdge(candidate.from, candidate.to);
