@@ -5,7 +5,7 @@ import { REGION_SIZE_TILES } from './regions';
 import { key, random, tileAtConfig, worldToRegion, type RegionCoordinate, type WorldConfig, type WorldCoordinate } from './world';
 import type { WorldPoint } from './settlements';
 
-export const ROAD_NETWORK_VERSION = 5;
+export const ROAD_NETWORK_VERSION = 6;
 export const ROAD_GRAPH_REGION_SIZE = 4;
 const COARSE_CELL_SIZE = 16;
 
@@ -165,12 +165,34 @@ export function generateRoadCell(config: WorldConfig, regions: RegionData[], gx:
   const nodes = [...portalNodes, ...settlementNodes].sort((a, b) => Math.atan2(a.y - center.y, a.x - center.x) - Math.atan2(b.y - center.y, b.x - center.x) || distance(a, center) - distance(b, center) || a.id.localeCompare(b.id));
   const planned: Array<{ from: RoadNode; to: RoadNode; path: WorldCoordinate[] }> = [];
   const claimedCoarse = new Set<string>();
-  for (let index = 0; index < nodes.length; index++) {
-    const from = nodes[index]; const to = nodes[(index + 1) % nodes.length];
-    const path = coarseRoute(config, from, to, cell, claimedCoarse, terrainCache, tileCache);
-    if (path.length < 2) return { nodes, segments: [] };
-    planned.push({ from, to, path });
+  const parent = new Map(nodes.map((node) => [node.id, node.id]));
+  const find = (id: string): string => {
+    const root = parent.get(id);
+    if (!root || root === id) return root ?? id;
+    const resolved = find(root);
+    parent.set(id, resolved);
+    return resolved;
+  };
+  const union = (a: string, b: string) => {
+    const rootA = find(a); const rootB = find(b);
+    if (rootA === rootB) return false;
+    parent.set(rootA, rootB);
+    return true;
+  };
+  const candidates: Array<{ from: RoadNode; to: RoadNode; score: number }> = [];
+  for (let fromIndex = 0; fromIndex < nodes.length; fromIndex++) for (let toIndex = fromIndex + 1; toIndex < nodes.length; toIndex++) {
+    const from = nodes[fromIndex]; const to = nodes[toIndex];
+    if (from.ownerId === to.ownerId) continue;
+    candidates.push({ from, to, score: (from.x - to.x) ** 2 + (from.y - to.y) ** 2 });
+  }
+  candidates.sort((a, b) => a.score - b.score || `${a.from.id}|${a.to.id}`.localeCompare(`${b.from.id}|${b.to.id}`));
+  for (const candidate of candidates) {
+    if (find(candidate.from.id) === find(candidate.to.id)) continue;
+    const path = coarseRoute(config, candidate.from, candidate.to, cell, claimedCoarse, terrainCache, tileCache);
+    if (path.length < 2 || !union(candidate.from.id, candidate.to.id)) continue;
+    planned.push({ from: candidate.from, to: candidate.to, path });
     for (const point of path) claimedCoarse.add(key(Math.floor(point.x / COARSE_CELL_SIZE), Math.floor(point.y / COARSE_CELL_SIZE)));
+    if (planned.length >= nodes.length - 1) break;
   }
   const segments: RoadSegment[] = [];
   for (const edge of planned) {

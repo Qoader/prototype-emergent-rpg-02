@@ -25,6 +25,37 @@ describe('organic road planning', () => {
     expect(roadGraphCell(0, 0)).toEqual(roadGraphCell(0, 0)); expect(first).toEqual(second); expect(new Set(first.segments.map((segment) => segment.id)).size).toBe(first.segments.length); expect(first.segments.every((segment) => segment.ownerRegion.rx === 0 && segment.ownerRegion.ry === 0)).toBe(true);
   }, 30000);
 
+  it('keeps the planning-cell graph acyclic and avoids same-settlement links', () => {
+    const config = createWorldConfig('ROAD-TOPOLOGY-TEST');
+    const settlementId = 'settlement:test';
+    const settlement = {
+      id: settlementId,
+      name: 'Teststead',
+      x: 120,
+      y: 120,
+      type: 'town' as const,
+      radius: 32,
+      populationClass: 60,
+      footprint: { width: 64, height: 64, rotation: 0 },
+      anchors: [],
+      accessPoints: [
+        { id: `${settlementId}:gate:north`, ownerId: settlementId, x: 120, y: 88, kind: 'settlement-gate' as const, importance: 0.6, preferredDirections: ['north' as const] },
+        { id: `${settlementId}:gate:south`, ownerId: settlementId, x: 120, y: 152, kind: 'settlement-gate' as const, importance: 0.6, preferredDirections: ['south' as const] },
+      ],
+    };
+    const region: RegionData = { ...fixture(0, 0), settlements: [settlement] };
+    const generated = generateRoadCell(config, [region], 0, 0);
+    const parents = new Map<string, { from: string; to: string; fromOwner: string; toOwner: string }>();
+    for (const segment of generated.segments) parents.set(segment.parentId, { from: segment.from.id, to: segment.to.id, fromOwner: segment.from.ownerId, toOwner: segment.to.ownerId });
+    const parentOf = new Map(generated.nodes.map((node) => [node.id, node.id]));
+    const find = (id: string): string => { const root = parentOf.get(id) ?? id; if (root === id) return id; const resolved = find(root); parentOf.set(id, resolved); return resolved; };
+    for (const edge of parents.values()) {
+      expect(edge.fromOwner).not.toBe(edge.toOwner);
+      expect(find(edge.from)).not.toBe(find(edge.to));
+      parentOf.set(find(edge.from), find(edge.to));
+    }
+  }, 30000);
+
   it('connects the deterministic spawn to a reachable settlement gate', () => {
     const config = createWorldConfig('EMBERWILD-01'); const start = findStartingPosition(config); const origin = worldToRegion(start.x, start.y); const regions: RegionData[] = [];
     for (let ry = origin.ry - 2; ry <= origin.ry + 2; ry++) for (let rx = origin.rx - 2; rx <= origin.rx + 2; rx++) regions.push(generateRegion(config, rx, ry));
