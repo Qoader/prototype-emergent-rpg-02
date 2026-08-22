@@ -63,6 +63,7 @@ describe('organic road planning', () => {
     expect(segments.length).toBeGreaterThan(0);
     expect(segments[0].from.kind).toBe('player-start');
     expect(segments.filter((segment) => segment.from.kind === 'player-start').length).toBeGreaterThanOrEqual(2);
+    expect(new Set(segments.filter((segment) => segment.from.kind === 'player-start').map((segment) => segment.to.ownerId)).size).toBeGreaterThanOrEqual(2);
     expect(segments.some((segment) => segment.to.kind === 'settlement-gate')).toBe(true);
     expect(segments.flatMap((segment) => segment.tiles)).toContainEqual(start);
   }, 30000);
