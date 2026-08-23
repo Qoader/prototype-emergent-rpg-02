@@ -37,8 +37,8 @@ function settlementCandidate(config: WorldConfig, rx: number, ry: number, index:
   return { id: featureId(config, 'settlement', point.x, point.y), ...point, rx: owner.rx, ry: owner.ry, score, type };
 }
 
-const SETTLEMENT_NAME_PREFIXES = ['Ash', 'Briar', 'Cinder', 'Dun', 'Elder', 'Fallow', 'Glimmer', 'Grim', 'Hearth', 'Iron', 'Raven', 'Rose', 'Silver', 'Thorn', 'Wick', 'Winter'];
-const SETTLEMENT_NAME_SUFFIXES = ['barrow', 'brook', 'combe', 'crest', 'fall', 'ford', 'haven', 'mere', 'mont', 'stead', 'stone', 'vale', 'watch', 'wick', 'wood'];
+const SETTLEMENT_NAME_PREFIXES = ['Ash', 'Briar', 'Cinder', 'Dun', 'Elder', 'Fallow', 'Glimmer', 'Grim', 'Hearth', 'Iron', 'Raven', 'Rose', 'Silver', 'Thorn', 'Wick', 'Winter', 'Amber', 'Black', 'Bright', 'Copper', 'Dragon', 'Ever', 'Fox', 'Golden', 'Green', 'High', 'Moon', 'Oak', 'Red', 'Star', 'Storm', 'White'];
+const SETTLEMENT_NAME_SUFFIXES = ['barrow', 'brook', 'combe', 'crest', 'fall', 'ford', 'haven', 'mere', 'mont', 'stead', 'stone', 'vale', 'watch', 'wick', 'wood', 'bridge', 'burrow', 'cairn', 'cliff', 'dale', 'gate', 'grove', 'hearth', 'holt', 'keep', 'march', 'meadow', 'moor', 'port', 'reach', 'ridge', 'thorpe'];
 
 export function settlementName(config: WorldConfig, id: string) {
   const prefix = SETTLEMENT_NAME_PREFIXES[Math.floor(random(config, 'region:settlement-name-prefix', id) * SETTLEMENT_NAME_PREFIXES.length)];
