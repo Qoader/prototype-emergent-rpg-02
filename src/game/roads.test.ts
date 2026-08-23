@@ -70,6 +70,9 @@ describe('organic road planning', () => {
       const values = destinations.get(owner) ?? new Set<string>(); values.add(destination); destinations.set(owner, values);
     }
     expect(destinations.get(settlementId)?.size).toBeGreaterThanOrEqual(2);
+    const settlementGateIds = new Set<string>();
+    for (const segment of generated.segments) for (const endpoint of [segment.from, segment.to]) if (endpoint.ownerId === settlementId) settlementGateIds.add(endpoint.id);
+    expect(settlementGateIds.size).toBeGreaterThanOrEqual(2);
     expect(parents.size).toBe(generated.nodes.length - 1);
   }, 30000);
 

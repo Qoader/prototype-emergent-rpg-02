@@ -1,11 +1,11 @@
 import { fieldsAt } from './fields';
 import { hydrologyAt } from './hydrology';
-import type { RegionData, RoadEndpoint } from './regions';
+import { generateRegion, type RegionData, type RoadEndpoint } from './regions';
 import { REGION_SIZE_TILES } from './regions';
-import { key, random, tileAtConfig, worldToRegion, type RegionCoordinate, type WorldConfig, type WorldCoordinate } from './world';
+import { findStartingPosition, key, random, tileAtConfig, worldToRegion, type RegionCoordinate, type WorldConfig, type WorldCoordinate } from './world';
 import type { WorldPoint } from './settlements';
 
-export const ROAD_NETWORK_VERSION = 10;
+export const ROAD_NETWORK_VERSION = 11;
 export const ROAD_GRAPH_REGION_SIZE = 4;
 const COARSE_CELL_SIZE = 16;
 const COARSE_TERRAIN_CACHE_LIMIT = 8192;
@@ -21,6 +21,49 @@ function regionKey(region: RegionCoordinate) { return `${region.rx},${region.ry}
 function graphCell(rx: number, ry: number) { return { gx: Math.floor(rx / ROAD_GRAPH_REGION_SIZE), gy: Math.floor(ry / ROAD_GRAPH_REGION_SIZE) }; }
 export function roadGraphCell(rx: number, ry: number) { return graphCell(rx, ry); }
 function distance(a: WorldCoordinate, b: WorldCoordinate) { return Math.hypot(a.x - b.x, a.y - b.y); }
+
+type PlannedRoadEdge = { from: RoadNode; to: RoadNode };
+
+// Starter roads are generated independently from regional road cells. Keep a
+// small deterministic reservation set so a regional road can leave the
+// starter entry gate free without depending on request order or cache state.
+const starterSettlementMemo = new Map<string, Set<string>>();
+function starterSettlementIds(config: WorldConfig) {
+  const cacheKey = `${config.seed}:v${config.version}`;
+  const cached = starterSettlementMemo.get(cacheKey); if (cached) return cached;
+  const start = findStartingPosition(config); const origin = worldToRegion(start.x, start.y); const settlements = [] as Array<{ id: string; x: number; y: number }>;
+  // The starter-road generator searches this same deterministic ring. Avoid a
+  // runtime dependency on route success here; fallback routing makes the
+  // nearest candidates the effective reservation set in normal worlds.
+  for (let ry = origin.ry - 2; ry <= origin.ry + 2; ry++) for (let rx = origin.rx - 2; rx <= origin.rx + 2; rx++) {
+    for (const settlement of generateRegion(config, rx, ry).settlements) settlements.push(settlement);
+  }
+  settlements.sort((a, b) => distance(start, a) - distance(start, b) || a.id.localeCompare(b.id));
+  const result = new Set(settlements.slice(0, 2).map((settlement) => settlement.id)); starterSettlementMemo.set(cacheKey, result); return result;
+}
+
+function assignPhysicalGates(config: WorldConfig, edges: PlannedRoadEdge[], gatesByOwner: Map<string, RoadNode[]>) {
+  const reservedOwners = starterSettlementIds(config);
+  const starter = findStartingPosition(config);
+  const assigned = new Map<string, Set<string>>();
+  const endpointFor = (node: RoadNode, opposite: RoadNode, edgeId: string) => {
+    if (node.kind !== 'settlement-gate') return node;
+    const gates = (gatesByOwner.get(node.ownerId) ?? [node]).slice().sort((a, b) => a.id.localeCompare(b.id));
+    const used = assigned.get(node.ownerId) ?? new Set<string>(); assigned.set(node.ownerId, used);
+    // Starter roads reserve the nearest entry gate. Regional edges avoid it
+    // whenever there is another physical gate available.
+    const starterGate = gates.slice().sort((a, b) => distance(a, starter) - distance(b, starter) || a.id.localeCompare(b.id))[0];
+    const available = gates.filter((gate) => !used.has(gate.id) && !(reservedOwners.has(node.ownerId) && gate.id === starterGate?.id));
+    const candidates = available.length ? available : gates.filter((gate) => !used.has(gate.id));
+    const pool = candidates.length ? candidates : gates;
+    const selected = pool.slice().sort((a, b) => distance(a, opposite) - distance(b, opposite) || `${a.id}|${edgeId}`.localeCompare(`${b.id}|${edgeId}`))[0];
+    used.add(selected.id); return selected;
+  };
+  return edges.map((edge, index) => ({
+    from: endpointFor(edge.from, edge.to, `${index}:from`),
+    to: endpointFor(edge.to, edge.from, `${index}:to`),
+  }));
+}
 function portalNode(config: WorldConfig, gx: number, gy: number, side: 'north' | 'east' | 'south' | 'west'): RoadNode {
   const cellSize = ROAD_GRAPH_REGION_SIZE * REGION_SIZE_TILES;
   const minX = gx * cellSize; const minY = gy * cellSize; const maxX = minX + cellSize - 1; const maxY = minY + cellSize - 1;
@@ -289,10 +332,12 @@ void generateLegacyRoadCell;
 
 export function generateRoadCell(config: WorldConfig, regions: RegionData[], gx: number, gy: number) {
   const cell = { gx, gy }; const nodeMap = new Map<string, RoadNode>();
+  const gatesByOwner = new Map<string, RoadNode[]>();
   const terrainCache = new Map<string, { fields: ReturnType<typeof fieldsAt>; waterBody: string }>(); const tileCache = new Map<string, ReturnType<typeof tileAtConfig>>();
   for (const region of regions) for (const settlement of region.settlements) {
-    const endpoint = [...settlement.accessPoints].sort((a, b) => a.id.localeCompare(b.id))[0];
-    if (endpoint) nodeMap.set(endpoint.id, { id: endpoint.id, ownerId: settlement.id, x: endpoint.x, y: endpoint.y, kind: endpoint.kind, importance: endpoint.importance });
+    const endpoints = [...settlement.accessPoints].sort((a, b) => a.id.localeCompare(b.id));
+    const gateNodes = endpoints.map((endpoint) => ({ id: endpoint.id, ownerId: settlement.id, x: endpoint.x, y: endpoint.y, kind: endpoint.kind, importance: endpoint.importance } satisfies RoadNode));
+    if (gateNodes.length) { nodeMap.set(gateNodes[0].id, gateNodes[0]); gatesByOwner.set(settlement.id, gateNodes); }
   }
   for (const side of ['north', 'east', 'south', 'west'] as const) { const node = portalNode(config, gx, gy, side); nodeMap.set(node.id, node); }
   const cellSize = ROAD_GRAPH_REGION_SIZE * REGION_SIZE_TILES; const center = { x: gx * cellSize + (cellSize - 1) / 2, y: gy * cellSize + (cellSize - 1) / 2 };
@@ -320,8 +365,9 @@ export function generateRoadCell(config: WorldConfig, regions: RegionData[], gx:
     const target = [...spine].sort((a, b) => distance(portal, a) - distance(portal, b) || a.id.localeCompare(b.id))[0];
     if (target) planned.push({ from: portal, to: target });
   }
+  const physicalPlanned = assignPhysicalGates(config, planned, gatesByOwner);
   const claimedCoarse = new Set<string>(); const segments: RoadSegment[] = [];
-  for (const edge of planned) {
+  for (const edge of physicalPlanned) {
     const path = routeWithGuarantee(config, edge.from, edge.to, cell, claimedCoarse, terrainCache, tileCache);
     const parentId = `${config.seed}:v${config.version}:road:${edge.from.id}|${edge.to.id}`;
     segments.push(...splitSegment(parentId, edge.from, edge.to, path, config));
