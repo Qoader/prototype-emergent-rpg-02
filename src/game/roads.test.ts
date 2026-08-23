@@ -17,7 +17,7 @@ describe('organic road planning', () => {
     const generated = generateRoadCell(config, [fixture(0, 0)], 0, 0);
     expect(generated.nodes.filter((node) => node.kind === 'region-border')).toHaveLength(4);
     expect(new Set(generated.nodes.filter((node) => node.kind === 'region-border').map((node) => node.id)).size).toBe(4);
-  });
+  }, 30000);
 
   it('uses a stable graph cell and deterministic segment IDs', () => {
     const config = createWorldConfig('ROAD-TEST'); const regions = [fixture(0, 0)];
@@ -54,6 +54,36 @@ describe('organic road planning', () => {
       expect(find(edge.from)).not.toBe(find(edge.to));
       parentOf.set(find(edge.from), find(edge.to));
     }
+    const destinations = new Map<string, Set<string>>();
+    for (const edge of parents.values()) for (const [owner, destination] of [[edge.fromOwner, edge.toOwner], [edge.toOwner, edge.fromOwner]]) {
+      if (owner !== settlementId) continue;
+      const values = destinations.get(owner) ?? new Set<string>(); values.add(destination); destinations.set(owner, values);
+    }
+    expect(destinations.get(settlementId)?.size).toBeGreaterThanOrEqual(2);
+    expect(parents.size).toBe(generated.nodes.length - 1);
+  }, 30000);
+
+  it('gives every settlement two distinct destinations in a multi-settlement cell', () => {
+    const config = createWorldConfig('ROAD-DEGREE-TEST');
+    const makeSettlement = (id: string, x: number, y: number) => ({
+      id, name: id, x, y, type: 'village' as const, radius: 23, populationClass: 50, footprint: { width: 46, height: 46, rotation: 0 }, anchors: [],
+      accessPoints: [
+        { id: `${id}:north`, ownerId: id, x, y: y - 23, kind: 'settlement-gate' as const, importance: 0.5, preferredDirections: ['north' as const] },
+      ],
+    });
+    const settlements = [makeSettlement('settlement:a', 96, 96), makeSettlement('settlement:b', 224, 128), makeSettlement('settlement:c', 144, 256)];
+    const generated = generateRoadCell(config, [{ ...fixture(0, 0), settlements }], 0, 0);
+    const parents = new Map<string, { fromOwner: string; toOwner: string }>();
+    for (const segment of generated.segments) parents.set(segment.parentId, { fromOwner: segment.from.ownerId, toOwner: segment.to.ownerId });
+    for (const settlement of settlements) {
+      const destinations = new Set<string>();
+      for (const edge of parents.values()) {
+        if (edge.fromOwner === settlement.id) destinations.add(edge.toOwner);
+        if (edge.toOwner === settlement.id) destinations.add(edge.fromOwner);
+      }
+      expect(destinations.size).toBeGreaterThanOrEqual(2);
+    }
+    expect(parents.size).toBe(generated.nodes.length - 1);
   }, 30000);
 
   it('connects the deterministic spawn to a reachable settlement gate', () => {

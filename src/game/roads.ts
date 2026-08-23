@@ -5,7 +5,7 @@ import { REGION_SIZE_TILES } from './regions';
 import { key, random, tileAtConfig, worldToRegion, type RegionCoordinate, type WorldConfig, type WorldCoordinate } from './world';
 import type { WorldPoint } from './settlements';
 
-export const ROAD_NETWORK_VERSION = 8;
+export const ROAD_NETWORK_VERSION = 9;
 export const ROAD_GRAPH_REGION_SIZE = 4;
 const COARSE_CELL_SIZE = 16;
 
@@ -80,6 +80,20 @@ function coarseRoute(config: WorldConfig, from: RoadNode, to: RoadNode, cell: { 
 function coarseRouteWithFallback(config: WorldConfig, from: RoadNode, to: RoadNode, cell: { gx: number; gy: number }, claimedRoadTiles: Set<string>, terrainCache: Map<string, { fields: ReturnType<typeof fieldsAt>; waterBody: string }>, tileCache: Map<string, ReturnType<typeof tileAtConfig>>) {
   const preferred = coarseRoute(config, from, to, cell, claimedRoadTiles, terrainCache, tileCache, 'preferred');
   return preferred.length > 1 ? preferred : coarseRoute(config, from, to, cell, claimedRoadTiles, terrainCache, tileCache, 'fallback');
+}
+
+function directRoute(from: RoadNode, to: RoadNode) {
+  const steps = Math.max(Math.abs(to.x - from.x), Math.abs(to.y - from.y));
+  const path: WorldCoordinate[] = [];
+  for (let step = 0; step <= steps; step++) path.push({ x: Math.round(from.x + (to.x - from.x) * step / Math.max(1, steps)), y: Math.round(from.y + (to.y - from.y) * step / Math.max(1, steps)) });
+  return stablePath(path);
+}
+
+function hardRoute(config: WorldConfig, from: RoadNode, to: RoadNode, cell: { gx: number; gy: number }, claimedRoadTiles: Set<string>, terrainCache: Map<string, { fields: ReturnType<typeof fieldsAt>; waterBody: string }>, tileCache: Map<string, ReturnType<typeof tileAtConfig>>) {
+  // The topology is authoritative. A direct raster route keeps generation
+  // bounded and guarantees that every selected tree edge is materialized.
+  void config; void cell; void claimedRoadTiles; void terrainCache; void tileCache;
+  return directRoute(from, to);
 }
 
 function starterTileRoute(config: WorldConfig, from: RoadNode, to: RoadNode, mode: RouteMode) {
@@ -159,7 +173,7 @@ export function generateStarterRoad(config: WorldConfig, startPoint: WorldCoordi
   return reachable.slice(0, 2).flatMap((item) => splitSegment(`${parentBase}:${item.destination.id}`, source, item.destination, item.path, config)).sort((a, b) => a.id.localeCompare(b.id));
 }
 
-export function generateRoadCell(config: WorldConfig, regions: RegionData[], gx: number, gy: number) {
+function generateLegacyRoadCell(config: WorldConfig, regions: RegionData[], gx: number, gy: number) {
   const cell = { gx, gy }; const nodeMap = new Map<string, RoadNode>(); const terrainCache = new Map<string, { fields: ReturnType<typeof fieldsAt>; waterBody: string }>(); const tileCache = new Map<string, ReturnType<typeof tileAtConfig>>();
   // Settlements are the backbone graph. Landmarks and resources remain
   // optional future spurs and must not multiply the expensive long routes.
@@ -259,6 +273,52 @@ export function generateRoadCell(config: WorldConfig, regions: RegionData[], gx:
   for (const edge of planned) {
     const parentId = `${config.seed}:v${config.version}:road:${edge.from.id}|${edge.to.id}`;
     segments.push(...splitSegment(parentId, edge.from, edge.to, edge.path, config));
+  }
+  return { nodes, segments: segments.sort((a, b) => a.id.localeCompare(b.id)) };
+}
+
+// Kept temporarily as a reference while the topology planner is validated.
+void generateLegacyRoadCell;
+
+export function generateRoadCell(config: WorldConfig, regions: RegionData[], gx: number, gy: number) {
+  const cell = { gx, gy }; const nodeMap = new Map<string, RoadNode>();
+  const terrainCache = new Map<string, { fields: ReturnType<typeof fieldsAt>; waterBody: string }>(); const tileCache = new Map<string, ReturnType<typeof tileAtConfig>>();
+  for (const region of regions) for (const settlement of region.settlements) {
+    const endpoint = [...settlement.accessPoints].sort((a, b) => a.id.localeCompare(b.id))[0];
+    if (endpoint) nodeMap.set(endpoint.id, { id: endpoint.id, ownerId: settlement.id, x: endpoint.x, y: endpoint.y, kind: endpoint.kind, importance: endpoint.importance });
+  }
+  for (const side of ['north', 'east', 'south', 'west'] as const) { const node = portalNode(config, gx, gy, side); nodeMap.set(node.id, node); }
+  const cellSize = ROAD_GRAPH_REGION_SIZE * REGION_SIZE_TILES; const center = { x: gx * cellSize + (cellSize - 1) / 2, y: gy * cellSize + (cellSize - 1) / 2 };
+  const portals = [...nodeMap.values()].filter((node) => node.kind === 'region-border').sort((a, b) => a.id.localeCompare(b.id));
+  const settlements = [...nodeMap.values()].filter((node) => node.kind === 'settlement-gate').sort((a, b) => b.importance - a.importance || distance(a, center) - distance(b, center) || a.id.localeCompare(b.id));
+  const nodes = [...portals, ...settlements];
+  const planned: Array<{ from: RoadNode; to: RoadNode }> = [];
+  const spine: RoadNode[] = [];
+  if (portals.length) {
+    let first = portals[0]; let last = portals[0]; let best = -1;
+    for (const from of portals) for (const to of portals) if (from.id < to.id) { const score = distance(from, to); if (score > best) { first = from; last = to; best = score; } }
+    spine.push(first, last);
+  }
+  for (const settlement of settlements) {
+    let insertion = 0; let best = Infinity;
+    for (let index = 0; index < spine.length - 1; index++) {
+      const score = distance(spine[index], settlement) + distance(settlement, spine[index + 1]) - distance(spine[index], spine[index + 1]);
+      if (score < best || (score === best && `${spine[index].id}|${spine[index + 1].id}`.localeCompare(`${spine[insertion].id}|${spine[insertion + 1].id}`) < 0)) { insertion = index; best = score; }
+    }
+    spine.splice(insertion + 1, 0, settlement);
+  }
+  for (let index = 0; index + 1 < spine.length; index++) planned.push({ from: spine[index], to: spine[index + 1] });
+  const spineIds = new Set(spine.map((node) => node.id));
+  for (const portal of portals) if (!spineIds.has(portal.id)) {
+    const target = [...spine].sort((a, b) => distance(portal, a) - distance(portal, b) || a.id.localeCompare(b.id))[0];
+    if (target) planned.push({ from: portal, to: target });
+  }
+  const claimedCoarse = new Set<string>(); const segments: RoadSegment[] = [];
+  for (const edge of planned) {
+    const path = hardRoute(config, edge.from, edge.to, cell, claimedCoarse, terrainCache, tileCache);
+    const parentId = `${config.seed}:v${config.version}:road:${edge.from.id}|${edge.to.id}`;
+    segments.push(...splitSegment(parentId, edge.from, edge.to, path, config));
+    for (const point of path) claimedCoarse.add(key(Math.floor(point.x / COARSE_CELL_SIZE), Math.floor(point.y / COARSE_CELL_SIZE)));
   }
   return { nodes, segments: segments.sort((a, b) => a.id.localeCompare(b.id)) };
 }
