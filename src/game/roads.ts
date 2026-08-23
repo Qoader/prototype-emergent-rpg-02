@@ -5,9 +5,11 @@ import { REGION_SIZE_TILES } from './regions';
 import { key, random, tileAtConfig, worldToRegion, type RegionCoordinate, type WorldConfig, type WorldCoordinate } from './world';
 import type { WorldPoint } from './settlements';
 
-export const ROAD_NETWORK_VERSION = 9;
+export const ROAD_NETWORK_VERSION = 10;
 export const ROAD_GRAPH_REGION_SIZE = 4;
 const COARSE_CELL_SIZE = 16;
+const COARSE_TERRAIN_CACHE_LIMIT = 8192;
+const coarseTerrainMemo = new Map<string, { fields: ReturnType<typeof fieldsAt>; waterBody: string }>();
 
 export type RoadImportance = 'trail' | 'road' | 'highway';
 export interface RoadNode { id: string; ownerId: string; x: number; y: number; kind: RoadEndpoint['kind'] | 'junction' | 'player-start'; importance: number; }
@@ -50,13 +52,17 @@ function coarseRoute(config: WorldConfig, from: RoadNode, to: RoadNode, cell: { 
   // Keep cold generation bounded. Long routes are retried through the
   // neighbouring settlement/portal candidates rather than monopolising the
   // worker on a single blocked search.
-  const expansionBudget = Math.min(2400, Math.max(360, Math.ceil(span * span * 0.08)));
+  const expansionBudget = Math.min(120, Math.max(40, Math.ceil(span * span * 0.004)));
   let expandedNodes = 0; while (frontier.length && expandedNodes++ < expansionBudget) {
     const current = frontier.pop()!; if (current.x === target.x && current.y === target.y) break;
     for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]] as const) {
       const x = current.x + dx; const y = current.y + dy; if (x < minX || x > maxX || y < minY || y > maxY) continue;
-      const wx = x * COARSE_CELL_SIZE + Math.floor(COARSE_CELL_SIZE / 2); const wy = y * COARSE_CELL_SIZE + Math.floor(COARSE_CELL_SIZE / 2); const terrainKey = `${wx},${wy}`; let sample = terrainCache.get(terrainKey);
-      if (!sample) { const fields = fieldsAt(config, wx, wy); sample = { fields, waterBody: hydrologyAt(config, wx, wy, fields).waterBody }; terrainCache.set(terrainKey, sample); }
+      const wx = x * COARSE_CELL_SIZE + Math.floor(COARSE_CELL_SIZE / 2); const wy = y * COARSE_CELL_SIZE + Math.floor(COARSE_CELL_SIZE / 2); const terrainKey = `${config.seed}:v${config.version}:${wx},${wy}`; let sample = terrainCache.get(terrainKey);
+      if (!sample) {
+        sample = coarseTerrainMemo.get(terrainKey);
+        if (!sample) { const fields = fieldsAt(config, wx, wy); sample = { fields, waterBody: hydrologyAt(config, wx, wy, fields).waterBody }; coarseTerrainMemo.set(terrainKey, sample); if (coarseTerrainMemo.size > COARSE_TERRAIN_CACHE_LIMIT) coarseTerrainMemo.delete(coarseTerrainMemo.keys().next().value!); }
+        terrainCache.set(terrainKey, sample);
+      }
       const fields = sample.fields;
       const unsuitable = sample.waterBody !== 'none' || fields.elevation < 0.24 || fields.elevation > 0.76 || fields.slope > 0.14;
       if (mode === 'preferred' && unsuitable) continue;
@@ -89,11 +95,12 @@ function directRoute(from: RoadNode, to: RoadNode) {
   return stablePath(path);
 }
 
-function hardRoute(config: WorldConfig, from: RoadNode, to: RoadNode, cell: { gx: number; gy: number }, claimedRoadTiles: Set<string>, terrainCache: Map<string, { fields: ReturnType<typeof fieldsAt>; waterBody: string }>, tileCache: Map<string, ReturnType<typeof tileAtConfig>>) {
-  // The topology is authoritative. A direct raster route keeps generation
-  // bounded and guarantees that every selected tree edge is materialized.
-  void config; void cell; void claimedRoadTiles; void terrainCache; void tileCache;
-  return directRoute(from, to);
+function routeWithGuarantee(config: WorldConfig, from: RoadNode, to: RoadNode, cell: { gx: number; gy: number }, claimedRoadTiles: Set<string>, terrainCache: Map<string, { fields: ReturnType<typeof fieldsAt>; waterBody: string }>, tileCache: Map<string, ReturnType<typeof tileAtConfig>>) {
+  // Topology remains authoritative: the bounded preferred/fallback searches
+  // provide natural detours, while the direct raster route guarantees that a
+  // selected edge is still materialized if both searches exhaust their budget.
+  const routed = coarseRouteWithFallback(config, from, to, cell, claimedRoadTiles, terrainCache, tileCache);
+  return routed.length > 1 ? routed : directRoute(from, to);
 }
 
 function starterTileRoute(config: WorldConfig, from: RoadNode, to: RoadNode, mode: RouteMode) {
@@ -315,7 +322,7 @@ export function generateRoadCell(config: WorldConfig, regions: RegionData[], gx:
   }
   const claimedCoarse = new Set<string>(); const segments: RoadSegment[] = [];
   for (const edge of planned) {
-    const path = hardRoute(config, edge.from, edge.to, cell, claimedCoarse, terrainCache, tileCache);
+    const path = routeWithGuarantee(config, edge.from, edge.to, cell, claimedCoarse, terrainCache, tileCache);
     const parentId = `${config.seed}:v${config.version}:road:${edge.from.id}|${edge.to.id}`;
     segments.push(...splitSegment(parentId, edge.from, edge.to, path, config));
     for (const point of path) claimedCoarse.add(key(Math.floor(point.x / COARSE_CELL_SIZE), Math.floor(point.y / COARSE_CELL_SIZE)));

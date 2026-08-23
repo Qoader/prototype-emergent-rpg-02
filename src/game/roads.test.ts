@@ -25,6 +25,16 @@ describe('organic road planning', () => {
     expect(roadGraphCell(0, 0)).toEqual(roadGraphCell(0, 0)); expect(first).toEqual(second); expect(new Set(first.segments.map((segment) => segment.id)).size).toBe(first.segments.length); expect(first.segments.every((segment) => segment.ownerRegion.rx === 0 && segment.ownerRegion.ry === 0)).toBe(true);
   }, 30000);
 
+  it('uses terrain-aware detours for normal regional roads when available', () => {
+    const config = createWorldConfig('ROAD-TERRAIN-TEST');
+    const generated = generateRoadCell(config, [fixture(0, 0)], 0, 0);
+    const hasDetour = generated.segments.some((segment) => {
+      const from = segment.from; const to = segment.to;
+      return segment.tiles.some((tile) => (tile.x - from.x) * (to.y - from.y) !== (tile.y - from.y) * (to.x - from.x));
+    });
+    expect(hasDetour).toBe(true);
+  }, 30000);
+
   it('keeps the planning-cell graph acyclic and avoids same-settlement links', () => {
     const config = createWorldConfig('ROAD-TOPOLOGY-TEST');
     const settlementId = 'settlement:test';
