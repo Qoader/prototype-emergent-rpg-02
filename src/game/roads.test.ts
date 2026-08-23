@@ -33,6 +33,13 @@ describe('organic road planning', () => {
       return segment.tiles.some((tile) => (tile.x - from.x) * (to.y - from.y) !== (tile.y - from.y) * (to.x - from.x));
     });
     expect(hasDetour).toBe(true);
+    for (const segment of generated.segments) {
+      for (let index = 1; index < segment.tiles.length; index++) {
+        const previous = segment.tiles[index - 1]; const current = segment.tiles[index];
+        expect(Math.abs(current.x - previous.x)).toBeLessThanOrEqual(1);
+        expect(Math.abs(current.y - previous.y)).toBeLessThanOrEqual(1);
+      }
+    }
   }, 30000);
 
   it('keeps the planning-cell graph acyclic and avoids same-settlement links', () => {

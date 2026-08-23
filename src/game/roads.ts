@@ -5,9 +5,12 @@ import { REGION_SIZE_TILES } from './regions';
 import { findStartingPosition, key, random, tileAtConfig, worldToRegion, type RegionCoordinate, type WorldConfig, type WorldCoordinate } from './world';
 import type { WorldPoint } from './settlements';
 
-export const ROAD_NETWORK_VERSION = 11;
+export const ROAD_NETWORK_VERSION = 12;
 export const ROAD_GRAPH_REGION_SIZE = 4;
 const COARSE_CELL_SIZE = 16;
+const REFINEMENT_CORRIDOR_RADIUS = 24;
+const REFINEMENT_EDGE_EXPANSION_CAP = 2_000;
+const REFINEMENT_CELL_EXPANSION_CAP = 16_000;
 const COARSE_TERRAIN_CACHE_LIMIT = 8192;
 const coarseTerrainMemo = new Map<string, { fields: ReturnType<typeof fieldsAt>; waterBody: string }>();
 
@@ -78,9 +81,10 @@ function portalNode(config: WorldConfig, gx: number, gy: number, side: 'north' |
 }
 function stablePath(path: WorldCoordinate[]) { return path.filter((point, index) => index === 0 || point.x !== path[index - 1].x || point.y !== path[index - 1].y); }
 class RouteHeap {
-  private values: Array<{ x: number; y: number; score: number }> = [];
+  private values: Array<{ x: number; y: number; score: number; cost?: number }> = [];
   get length() { return this.values.length; }
-  push(value: { x: number; y: number; score: number }) { this.values.push(value); let index = this.values.length - 1; while (index > 0) { const parent = Math.floor((index - 1) / 2); if (this.compare(this.values[parent], value) <= 0) break; this.values[index] = this.values[parent]; index = parent; } this.values[index] = value; }
+  push(value: { x: number; y: number; score: number; cost?: number }) { this.values.push(value); let index = this.values.length - 1; while (index > 0) { const parent = Math.floor((index - 1) / 2); if (this.compare(this.values[parent], value) <= 0) break; this.values[index] = this.values[parent]; index = parent; } this.values[index] = value; }
+  peek() { return this.values[0]; }
   pop() { if (!this.values.length) return undefined; const result = this.values[0]; const last = this.values.pop()!; if (this.values.length) { let index = 0; while (true) { const left = index * 2 + 1; if (left >= this.values.length) break; const right = left + 1; const child = right < this.values.length && this.compare(this.values[right], this.values[left]) < 0 ? right : left; if (this.compare(this.values[child], last) >= 0) break; this.values[index] = this.values[child]; index = child; } this.values[index] = last; } return result; }
   private compare(a: { x: number; y: number; score: number }, b: { x: number; y: number; score: number }) { return a.score - b.score || `${a.x},${a.y}`.localeCompare(`${b.x},${b.y}`); }
 }
@@ -138,12 +142,80 @@ function directRoute(from: RoadNode, to: RoadNode) {
   return stablePath(path);
 }
 
-function routeWithGuarantee(config: WorldConfig, from: RoadNode, to: RoadNode, cell: { gx: number; gy: number }, claimedRoadTiles: Set<string>, terrainCache: Map<string, { fields: ReturnType<typeof fieldsAt>; waterBody: string }>, tileCache: Map<string, ReturnType<typeof tileAtConfig>>) {
-  // Topology remains authoritative: the bounded preferred/fallback searches
-  // provide natural detours, while the direct raster route guarantees that a
-  // selected edge is still materialized if both searches exhaust their budget.
-  const routed = coarseRouteWithFallback(config, from, to, cell, claimedRoadTiles, terrainCache, tileCache);
-  return routed.length > 1 ? routed : directRoute(from, to);
+type RefinementStatus = 'refined' | 'budget-exhausted' | 'unreachable';
+type RefinementResult = { path: WorldCoordinate[]; status: RefinementStatus; expanded: number; meeting?: WorldCoordinate };
+
+/** Compact row intervals are far cheaper than materializing every tile in a wide corridor. */
+function corridorFor(path: WorldCoordinate[]) {
+  const rows = new Map<number, Array<[number, number]>>();
+  for (const point of path) for (let y = point.y - REFINEMENT_CORRIDOR_RADIUS; y <= point.y + REFINEMENT_CORRIDOR_RADIUS; y++) { const intervals = rows.get(y) ?? []; intervals.push([point.x - REFINEMENT_CORRIDOR_RADIUS, point.x + REFINEMENT_CORRIDOR_RADIUS]); rows.set(y, intervals); }
+  for (const [y, intervals] of rows) {
+    intervals.sort((a, b) => a[0] - b[0] || a[1] - b[1]); const merged: Array<[number, number]> = [];
+    for (const interval of intervals) { const previous = merged.at(-1); if (previous && interval[0] <= previous[1] + 1) previous[1] = Math.max(previous[1], interval[1]); else merged.push([...interval]); }
+    rows.set(y, merged);
+  }
+  return (x: number, y: number) => (rows.get(y) ?? []).some(([minX, maxX]) => x >= minX && x <= maxX);
+}
+
+function octileDistance(from: WorldCoordinate, to: WorldCoordinate) { const dx = Math.abs(to.x - from.x); const dy = Math.abs(to.y - from.y); return Math.max(dx, dy) + (Math.SQRT2 - 1) * Math.min(dx, dy); }
+
+function refineRegionalRoute(config: WorldConfig, from: RoadNode, to: RoadNode, coarsePath: WorldCoordinate[], cell: { gx: number; gy: number }, claimedRoadTiles: Set<string>, tileCache: Map<string, ReturnType<typeof tileAtConfig>>, cellBudget: { remaining: number }): RefinementResult {
+  const start = { x: from.x, y: from.y }; const target = { x: to.x, y: to.y }; const startKey = key(start.x, start.y); const targetKey = key(target.x, target.y);
+  const inCorridor = corridorFor(coarsePath);
+  const getTile = (x: number, y: number) => { const id = key(x, y); let tile = tileCache.get(id); if (!tile) { tile = tileAtConfig(config, x, y); tileCache.set(id, tile); } return tile; };
+  const traversable = (x: number, y: number) => { const tile = getTile(x, y); return tile.walkable || tile.hydrology.waterBody === 'river'; };
+  const stepCost = (x: number, y: number, diagonal: boolean) => {
+    const tile = getTile(x, y); const coarseKey = key(Math.floor(x / COARSE_CELL_SIZE), Math.floor(y / COARSE_CELL_SIZE));
+    const base = claimedRoadTiles.has(coarseKey) ? 0.2 : 1; const terrainPenalty = tile.hydrology.waterBody === 'river' ? 20 : Math.max(0, tile.movementCost - 1);
+    return (diagonal ? Math.SQRT2 : 1) * (base + terrainPenalty + random(config, 'road:cost-noise', cell.gx, cell.gy, x, y) * 0.08);
+  };
+  if (!inCorridor(start.x, start.y) || !inCorridor(target.x, target.y) || !traversable(start.x, start.y) || !traversable(target.x, target.y)) return { path: [], status: 'unreachable', expanded: 0 };
+  const forward = new RouteHeap(); const reverse = new RouteHeap();
+  const forwardCost = new Map<string, number>([[startKey, 0]]); const reverseCost = new Map<string, number>([[targetKey, 0]]);
+  const forwardFrom = new Map<string, string | null>([[startKey, null]]); const reverseTo = new Map<string, string | null>([[targetKey, null]]);
+  // A weighted heuristic keeps the broad (48-tile) corridor from degenerating
+  // into Dijkstra exploration on long regional routes.
+  const score = (point: WorldCoordinate, goal: WorldCoordinate, cost: number) => cost + octileDistance(point, goal) * 1.5;
+  forward.push({ ...start, cost: 0, score: score(start, target, 0) }); reverse.push({ ...target, cost: 0, score: score(target, start, 0) });
+  let expanded = 0; const edgeCap = Math.min(REFINEMENT_EDGE_EXPANSION_CAP, cellBudget.remaining); let best = Infinity; let meeting: string | undefined;
+  const popValid = (heap: RouteHeap, costs: Map<string, number>) => { while (heap.length) { const candidate = heap.pop()!; if (costs.get(key(candidate.x, candidate.y)) === candidate.cost) return candidate; } return undefined; };
+  const expand = (current: { x: number; y: number; cost?: number }, costs: Map<string, number>, otherCosts: Map<string, number>, links: Map<string, string | null>, heap: RouteHeap, goal: WorldCoordinate, reverseDirection: boolean) => {
+    const currentKey = key(current.x, current.y); const currentCost = current.cost!;
+    if (otherCosts.has(currentKey) && currentCost + otherCosts.get(currentKey)! < best) { best = currentCost + otherCosts.get(currentKey)!; meeting = currentKey; }
+    for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) {
+      if (!dx && !dy) continue; const x = current.x + dx; const y = current.y + dy; const diagonal = Boolean(dx && dy);
+      if (!inCorridor(x, y) || !traversable(x, y)) continue;
+      if (diagonal && (!traversable(current.x + dx, current.y) || !traversable(current.x, current.y + dy))) continue;
+      // The reverse half traverses a forward edge from neighbour -> current.
+      const move = reverseDirection ? stepCost(current.x, current.y, diagonal) : stepCost(x, y, diagonal); const nextCost = currentCost + move; const nextKey = key(x, y);
+      if (nextCost >= (costs.get(nextKey) ?? Infinity)) continue;
+      costs.set(nextKey, nextCost); links.set(nextKey, currentKey); heap.push({ x, y, cost: nextCost, score: score({ x, y }, goal, nextCost) });
+      if (otherCosts.has(nextKey) && nextCost + otherCosts.get(nextKey)! < best) { best = nextCost + otherCosts.get(nextKey)!; meeting = nextKey; }
+    }
+  };
+  let expandForward = true;
+  while (forward.length && reverse.length && expanded < edgeCap && cellBudget.remaining > 0) {
+    const current = expandForward ? popValid(forward, forwardCost) : popValid(reverse, reverseCost);
+    if (!current) break;
+    if (expandForward) expand(current, forwardCost, reverseCost, forwardFrom, forward, target, false);
+    else expand(current, reverseCost, forwardCost, reverseTo, reverse, start, true);
+    expandForward = !expandForward;
+    expanded++; cellBudget.remaining--;
+    if (meeting && best < Infinity && forward.peek() && reverse.peek() && forward.peek()!.score >= best && reverse.peek()!.score >= best) break;
+  }
+  if (!meeting) return { path: [], status: expanded >= edgeCap || cellBudget.remaining <= 0 ? 'budget-exhausted' : 'unreachable', expanded };
+  const left: WorldCoordinate[] = []; let cursor: string | null = meeting;
+  while (cursor) { const [x, y] = cursor.split(',').map(Number); left.unshift({ x, y }); cursor = forwardFrom.get(cursor) ?? null; }
+  const right: WorldCoordinate[] = []; cursor = reverseTo.get(meeting) ?? null;
+  while (cursor) { const [x, y] = cursor.split(',').map(Number); right.push({ x, y }); cursor = reverseTo.get(cursor) ?? null; }
+  const [meetingX, meetingY] = meeting.split(',').map(Number); return { path: stablePath([...left, ...right]), status: 'refined', expanded, meeting: { x: meetingX, y: meetingY } };
+}
+
+function routeWithGuarantee(config: WorldConfig, from: RoadNode, to: RoadNode, cell: { gx: number; gy: number }, claimedRoadTiles: Set<string>, terrainCache: Map<string, { fields: ReturnType<typeof fieldsAt>; waterBody: string }>, tileCache: Map<string, ReturnType<typeof tileAtConfig>>, cellBudget: { remaining: number }) {
+  const coarse = coarseRouteWithFallback(config, from, to, cell, claimedRoadTiles, terrainCache, tileCache);
+  if (coarse.length < 2) return directRoute(from, to);
+  const refined = refineRegionalRoute(config, from, to, coarse, cell, claimedRoadTiles, tileCache, cellBudget);
+  return refined.path.length > 1 ? refined.path : coarse;
 }
 
 function starterTileRoute(config: WorldConfig, from: RoadNode, to: RoadNode, mode: RouteMode) {
@@ -366,9 +438,9 @@ export function generateRoadCell(config: WorldConfig, regions: RegionData[], gx:
     if (target) planned.push({ from: portal, to: target });
   }
   const physicalPlanned = assignPhysicalGates(config, planned, gatesByOwner);
-  const claimedCoarse = new Set<string>(); const segments: RoadSegment[] = [];
+  const claimedCoarse = new Set<string>(); const refinementBudget = { remaining: REFINEMENT_CELL_EXPANSION_CAP }; const segments: RoadSegment[] = [];
   for (const edge of physicalPlanned) {
-    const path = routeWithGuarantee(config, edge.from, edge.to, cell, claimedCoarse, terrainCache, tileCache);
+    const path = routeWithGuarantee(config, edge.from, edge.to, cell, claimedCoarse, terrainCache, tileCache, refinementBudget);
     const parentId = `${config.seed}:v${config.version}:road:${edge.from.id}|${edge.to.id}`;
     segments.push(...splitSegment(parentId, edge.from, edge.to, path, config));
     for (const point of path) claimedCoarse.add(key(Math.floor(point.x / COARSE_CELL_SIZE), Math.floor(point.y / COARSE_CELL_SIZE)));
