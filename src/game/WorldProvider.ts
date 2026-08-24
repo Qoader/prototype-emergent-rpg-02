@@ -1,5 +1,5 @@
 import { chunkAt, CHUNK_SIZE, REGION_CHUNK_SIZE, regionKey, findStartingPosition, worldToRegion, type WorldChunk, type WorldConfig } from './world';
-import { featureIntersectsBounds, generateRegion, type LandmarkAnchor, type RegionData, type ResourceAnchor, type RoadEndpoint, type SettlementShell } from './regions';
+import { featureIntersectsBounds, generateRegion, type LandmarkAnchor, type NearbySettlementResult, type RegionData, type ResourceAnchor, type RoadEndpoint, type SettlementShell } from './regions';
 import { generateSettlementLayout, layoutIntersectsBounds, settlementLayoutBounds, type SettlementLayout } from './settlements';
 import { generateRoadCell, generateStarterRoad, roadSegmentIntersectsBounds, ROAD_NETWORK_VERSION, roadGraphCell, starterClaimsForCell, type RoadNetwork, type RoadSegment } from './roads';
 import { LruCache } from './LruCache';
@@ -44,6 +44,17 @@ export class WorldProvider {
     const existing = this.inFlightRegions.get(key); if (existing) return existing;
     const request = Promise.resolve().then(() => generateRegion(this.config, rx, ry)).then((region) => { this.regions.set(key, region); return region; }).finally(() => this.inFlightRegions.delete(key));
     this.inFlightRegions.set(key, request); return request;
+  }
+
+  async getNearbySettlements(x: number, y: number, radius = 1, limit = 5): Promise<NearbySettlementResult> {
+    const origin = worldToRegion(x, y); const regions: RegionData[] = [];
+    for (let ry = origin.ry - radius; ry <= origin.ry + radius; ry++) for (let rx = origin.rx - radius; rx <= origin.rx + radius; rx++) regions.push(await this.getRegion(rx, ry));
+    const settlements = [...new Map(regions.flatMap((region) => region.settlements).map((settlement) => [settlement.id, settlement])).values()];
+    const result = settlements.map((settlement) => {
+      const gate = settlement.accessPoints.slice().sort((a, b) => Math.hypot(a.x - x, a.y - y) - Math.hypot(b.x - x, b.y - y) || a.id.localeCompare(b.id))[0];
+      return gate ? { id: settlement.id, name: settlement.name, type: settlement.type, x: settlement.x, y: settlement.y, gateX: gate.x, gateY: gate.y, distance: Math.hypot(settlement.x - x, settlement.y - y) } : undefined;
+    }).filter((value): value is NonNullable<typeof value> => Boolean(value)).sort((a, b) => a.distance - b.distance || a.id.localeCompare(b.id)).slice(0, limit);
+    return { settlements: result, searchedRadius: radius, complete: settlements.length >= limit };
   }
 
   private getStarterRoad(): Promise<RoadSegment[]> {

@@ -13,6 +13,8 @@ const RUIN_LANDMARK_CHANCE = 0.072;
 export interface RegionBounds { minX: number; minY: number; maxX: number; maxY: number; }
 export interface SettlementAnchor { id: string; type: 'center' | 'gate' | 'market' | 'well' | 'crossing' | 'harbor' | 'resource'; x: number; y: number; }
 export interface SettlementShell { id: string; name: string; x: number; y: number; type: 'hamlet' | 'village' | 'town' | 'city'; radius: number; populationClass: number; footprint: { width: number; height: number; rotation: number }; anchors: SettlementAnchor[]; accessPoints: RoadEndpoint[]; }
+export interface NearbySettlement { id: string; name: string; type: SettlementShell['type']; x: number; y: number; gateX: number; gateY: number; distance: number; }
+export interface NearbySettlementResult { settlements: NearbySettlement[]; searchedRadius: number; complete: boolean; }
 export interface LandmarkAnchor { id: string; type: 'ruin' | 'shrine' | 'watchtower' | 'natural-wonder'; x: number; y: number; importance: number; }
 export interface ResourceAnchor { id: string; type: 'forest' | 'fertile-land' | 'ore' | 'stone' | 'salt' | 'water'; x: number; y: number; importance: number; }
 export interface RoadEndpoint { id: string; ownerId: string; x: number; y: number; kind: 'settlement-gate' | 'landmark' | 'resource' | 'region-border'; importance: number; preferredDirections: Direction[]; }

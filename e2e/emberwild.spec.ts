@@ -16,4 +16,17 @@ test.describe('Emberwild', () => {
     await expect(page.locator('.tile-debug')).toContainText('CURRENT TILE');
     await expect(page.locator('.tile-debug')).toContainText('starter-ground');
   });
+
+  test('opens settings and toggles tile debug visibility', async ({ page }) => {
+    await page.goto('./');
+    await page.getByRole('button', { name: 'Settings' }).click();
+    await expect(page.getByRole('dialog')).toBeVisible();
+    await expect(page.getByText('Nearby settlements', { exact: true })).toBeVisible();
+    const toggle = page.getByRole('checkbox', { name: 'Show tile info debug panel' });
+    await expect(toggle).toBeChecked();
+    await toggle.uncheck();
+    await expect(page.locator('.tile-debug')).toHaveCount(0);
+    await toggle.check();
+    await expect(page.locator('.tile-debug')).toBeVisible();
+  });
 });
