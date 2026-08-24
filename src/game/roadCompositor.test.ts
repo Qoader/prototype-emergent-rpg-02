@@ -28,18 +28,18 @@ describe('road composition', () => {
 
   it('extends a lower road into a wider winning road', () => {
     const result = composeRoads([road('branch', [[1, 0], [1, 1]], 1, 0x111111, 1), road('highway', [[0, 0], [1, 0], [2, 0]], 10, 0xeeeeee, 3)]);
-    expect(result.roads[1].points[0]).toEqual({ x: 1, y: -0.4125 });
+    expect(result.roads[1].points[0]).toEqual({ x: 1, y: -0.31875 });
   });
 
   it('extends a lower road from its trailing endpoint into a wider winner', () => {
     const result = composeRoads([road('branch', [[1, -1], [1, 0]], 1, 0x111111, 1), road('highway', [[0, 0], [1, 0], [2, 0]], 10, 0xeeeeee, 3)]);
-    expect(result.roads[1].points.at(-1)).toEqual({ x: 1, y: 0.4125 });
+    expect(result.roads[1].points.at(-1)).toEqual({ x: 1, y: 0.31875 });
   });
 
   it('extends along diagonal branch direction', () => {
     const result = composeRoads([road('branch', [[0, 0], [1, 1]], 1, 0x111111, 1), road('highway', [[0, 0], [1, 0], [2, 0]], 10, 0xeeeeee, 3)]);
-    expect(result.roads[1].points[0].x).toBeCloseTo(-0.292);
-    expect(result.roads[1].points[0].y).toBeCloseTo(-0.292);
+    expect(result.roads[1].points[0].x).toBeCloseTo(-0.2253);
+    expect(result.roads[1].points[0].y).toBeCloseTo(-0.2253);
   });
 
   it('does not leave a visible tail when the winner is narrower', () => {
