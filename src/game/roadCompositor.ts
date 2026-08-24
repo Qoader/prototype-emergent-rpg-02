@@ -1,3 +1,5 @@
+import { roadOuterHalfWidthInTiles } from './roadGeometry';
+
 export interface RoadTile { x: number; y: number; }
 export interface RoadPoint { x: number; y: number; }
 
@@ -36,7 +38,7 @@ export function composeRoads(candidates: RoadCandidate[]): RoadComposition {
     occupancy.set(id, current ? { ...current, count: current.count + 1 } : { winner: candidate, count: 1, tile });
   }
   const pointAt = (candidate: RoadCandidate, index: number) => candidate.points[Math.min(Math.max(index, 0), candidate.points.length - 1)];
-  const mergeDepth = (candidate: RoadCandidate, winner: RoadCandidate) => Math.min(candidate.width / 4, Math.max(0, (winner.width - candidate.width) / 8));
+  const mergeDepth = (candidate: RoadCandidate, winner: RoadCandidate) => winner.width > candidate.width ? roadOuterHalfWidthInTiles(winner.width) : 0;
   const extended = (point: RoadPoint, toward: RoadPoint, distance: number) => {
     if (!distance) return point;
     const dx = point.x - toward.x; const dy = point.y - toward.y; const length = Math.hypot(dx, dy);
