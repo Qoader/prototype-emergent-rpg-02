@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { generateRoadCell, generateRoadNetwork, generateStarterRoad, roadGraphCell } from './roads';
+import { generateRoadCell, generateRoadNetwork, generateStarterRoad, roadGraphCell, starterClaimsForCell } from './roads';
 import { generateRegion, regionBounds, type RegionData } from './regions';
 import { createWorldConfig, findStartingPosition, worldToRegion } from './world';
 
@@ -116,5 +116,21 @@ describe('organic road planning', () => {
     expect(new Set(segments.filter((segment) => segment.from.kind === 'player-start').map((segment) => segment.to.ownerId)).size).toBeGreaterThanOrEqual(2);
     expect(segments.some((segment) => segment.to.kind === 'settlement-gate')).toBe(true);
     expect(segments.flatMap((segment) => segment.tiles)).toContainEqual(start);
+    for (const segment of segments) for (let index = 1; index < segment.tiles.length; index++) {
+      const previous = segment.tiles[index - 1]; const current = segment.tiles[index];
+      expect(Math.abs(current.x - previous.x)).toBeLessThanOrEqual(1);
+      expect(Math.abs(current.y - previous.y)).toBeLessThanOrEqual(1);
+    }
   }, 30000);
+
+  it('projects starter tiles into only their intersected graph cell claims', () => {
+    const segment = {
+      id: 'starter', parentId: 'starter', ownerRegion: { rx: 0, ry: 0 },
+      from: { id: 'start', ownerId: 'start', x: 0, y: 0, kind: 'player-start' as const, importance: 1 },
+      to: { id: 'gate', ownerId: 'gate', x: 1536, y: 0, kind: 'settlement-gate' as const, importance: 1 },
+      importance: 'road' as const, width: 2, tiles: [{ x: 0, y: 0 }, { x: 1536, y: 0 }], points: [], bridges: [],
+    };
+    expect(starterClaimsForCell([segment], 0, 0)).toEqual(new Set(['0,0']));
+    expect(starterClaimsForCell([segment], 1, 0)).toEqual(new Set(['96,0']));
+  });
 });

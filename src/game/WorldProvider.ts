@@ -1,7 +1,7 @@
 import { chunkAt, CHUNK_SIZE, REGION_CHUNK_SIZE, regionKey, findStartingPosition, worldToRegion, type WorldChunk, type WorldConfig } from './world';
 import { featureIntersectsBounds, generateRegion, type LandmarkAnchor, type RegionData, type ResourceAnchor, type RoadEndpoint, type SettlementShell } from './regions';
 import { generateSettlementLayout, layoutIntersectsBounds, settlementLayoutBounds, type SettlementLayout } from './settlements';
-import { generateRoadCell, generateStarterRoad, roadSegmentIntersectsBounds, ROAD_NETWORK_VERSION, roadGraphCell, type RoadNetwork, type RoadSegment } from './roads';
+import { generateRoadCell, generateStarterRoad, roadSegmentIntersectsBounds, ROAD_NETWORK_VERSION, roadGraphCell, starterClaimsForCell, type RoadNetwork, type RoadSegment } from './roads';
 
 interface CacheEntry<T> { value: T; }
 
@@ -43,7 +43,8 @@ export class WorldProvider {
     const firstRx = cell.gx * 4; const firstRy = cell.gy * 4;
     for (let y = firstRy; y < firstRy + 4; y++) for (let x = firstRx; x < firstRx + 4; x++) coordinates.push({ rx: x, ry: y });
     const regionSource = Promise.all(coordinates.map((coordinate) => this.getRegion(coordinate.rx, coordinate.ry)));
-    const cellGenerated = Promise.resolve(this.roadCells.get(cellKey) ?? this.inFlightRoadCells.get(cellKey) ?? regionSource.then((regions) => generateRoadCell(this.config, regions, cell.gx, cell.gy).segments).then((segments) => { this.roadCells.set(cellKey, segments); return segments; }).finally(() => this.inFlightRoadCells.delete(cellKey)));
+    const starterSource = this.getStarterRoad();
+    const cellGenerated = Promise.resolve(this.roadCells.get(cellKey) ?? this.inFlightRoadCells.get(cellKey) ?? Promise.all([regionSource, starterSource]).then(([regions, starterRoad]) => generateRoadCell(this.config, regions, cell.gx, cell.gy, starterClaimsForCell(starterRoad, cell.gx, cell.gy)).segments).then((segments) => { this.roadCells.set(cellKey, segments); return segments; }).finally(() => this.inFlightRoadCells.delete(cellKey)));
     if (!this.roadCells.get(cellKey) && !this.inFlightRoadCells.has(cellKey)) this.inFlightRoadCells.set(cellKey, cellGenerated);
     const request = Promise.resolve(cellGenerated).then((segments) => { const network = { key: { rx, ry }, nodes: [], segments: segments.filter((segment) => segment.ownerRegion.rx === rx && segment.ownerRegion.ry === ry) }; this.roads.set(key, network); return network; }).finally(() => this.inFlightRoads.delete(key)); this.inFlightRoads.set(key, request); return request;
   }

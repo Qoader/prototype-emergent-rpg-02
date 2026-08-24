@@ -5,7 +5,7 @@ import { REGION_SIZE_TILES } from './regions';
 import { findStartingPosition, key, random, tileAtConfig, worldToRegion, type RegionCoordinate, type WorldConfig, type WorldCoordinate } from './world';
 import type { WorldPoint } from './settlements';
 
-export const ROAD_NETWORK_VERSION = 12;
+export const ROAD_NETWORK_VERSION = 13;
 export const ROAD_GRAPH_REGION_SIZE = 4;
 const COARSE_CELL_SIZE = 16;
 const REFINEMENT_CORRIDOR_RADIUS = 24;
@@ -80,6 +80,9 @@ function portalNode(config: WorldConfig, gx: number, gy: number, side: 'north' |
   return { id, ownerId: id, x: point.x, y: point.y, kind: 'region-border', importance: 0.72 };
 }
 function stablePath(path: WorldCoordinate[]) { return path.filter((point, index) => index === 0 || point.x !== path[index - 1].x || point.y !== path[index - 1].y); }
+function coarseClaimKeys(path: WorldCoordinate[]) {
+  return path.map((point) => key(Math.floor(point.x / COARSE_CELL_SIZE), Math.floor(point.y / COARSE_CELL_SIZE)));
+}
 class RouteHeap {
   private values: Array<{ x: number; y: number; score: number; cost?: number }> = [];
   get length() { return this.values.length; }
@@ -211,11 +214,16 @@ function refineRegionalRoute(config: WorldConfig, from: RoadNode, to: RoadNode, 
   const [meetingX, meetingY] = meeting.split(',').map(Number); return { path: stablePath([...left, ...right]), status: 'refined', expanded, meeting: { x: meetingX, y: meetingY } };
 }
 
-function routeWithGuarantee(config: WorldConfig, from: RoadNode, to: RoadNode, cell: { gx: number; gy: number }, claimedRoadTiles: Set<string>, terrainCache: Map<string, { fields: ReturnType<typeof fieldsAt>; waterBody: string }>, tileCache: Map<string, ReturnType<typeof tileAtConfig>>, cellBudget: { remaining: number }) {
+function routeWithGuide(config: WorldConfig, from: RoadNode, to: RoadNode, cell: { gx: number; gy: number }, claimedRoadTiles: Set<string>, terrainCache: Map<string, { fields: ReturnType<typeof fieldsAt>; waterBody: string }>, tileCache: Map<string, ReturnType<typeof tileAtConfig>>, cellBudget: { remaining: number }) {
   const coarse = coarseRouteWithFallback(config, from, to, cell, claimedRoadTiles, terrainCache, tileCache);
-  if (coarse.length < 2) return directRoute(from, to);
+  if (coarse.length < 2) return { path: [] as WorldCoordinate[], hasGuide: false };
   const refined = refineRegionalRoute(config, from, to, coarse, cell, claimedRoadTiles, tileCache, cellBudget);
-  return refined.path.length > 1 ? refined.path : coarse;
+  return { path: refined.path.length > 1 ? refined.path : coarse, hasGuide: true };
+}
+
+function routeWithGuarantee(config: WorldConfig, from: RoadNode, to: RoadNode, cell: { gx: number; gy: number }, claimedRoadTiles: Set<string>, terrainCache: Map<string, { fields: ReturnType<typeof fieldsAt>; waterBody: string }>, tileCache: Map<string, ReturnType<typeof tileAtConfig>>, cellBudget: { remaining: number }) {
+  const routed = routeWithGuide(config, from, to, cell, claimedRoadTiles, terrainCache, tileCache, cellBudget);
+  return routed.path.length > 1 ? routed.path : directRoute(from, to);
 }
 
 function starterTileRoute(config: WorldConfig, from: RoadNode, to: RoadNode, mode: RouteMode) {
@@ -262,6 +270,15 @@ function splitSegment(parentId: string, from: RoadNode, to: RoadNode, path: Worl
   flush(); return pieces;
 }
 
+export function starterClaimsForCell(segments: RoadSegment[], gx: number, gy: number) {
+  const claims = new Set<string>();
+  for (const segment of segments) for (const point of segment.tiles) {
+    const region = worldToRegion(point.x, point.y); const graph = graphCell(region.rx, region.ry);
+    if (graph.gx === gx && graph.gy === gy) claims.add(key(Math.floor(point.x / COARSE_CELL_SIZE), Math.floor(point.y / COARSE_CELL_SIZE)));
+  }
+  return claims;
+}
+
 /** Builds deterministic routes from the player spawn to distinct destinations. */
 export function generateStarterRoad(config: WorldConfig, startPoint: WorldCoordinate, regions: RegionData[]): RoadSegment[] {
   const settlementCandidates = [...new Map(regions.flatMap((region) => region.settlements).map((settlement) => [settlement.id, settlement])).values()];
@@ -271,22 +288,30 @@ export function generateStarterRoad(config: WorldConfig, startPoint: WorldCoordi
   const source: RoadNode = { id: `${config.seed}:v${config.version}:player-start:${startPoint.x},${startPoint.y}`, ownerId: `${config.seed}:v${config.version}:player-start`, x: startPoint.x, y: startPoint.y, kind: 'player-start', importance: 0.72 };
   const cell = roadGraphCell(worldToRegion(startPoint.x, startPoint.y).rx, worldToRegion(startPoint.x, startPoint.y).ry);
   const routeTo = (destination: RoadNode) => {
-    const path = coarseRouteWithFallback(config, source, destination, cell, new Set(), terrainCache, tileCache);
-    const finalPath = path.length > 1 ? path : starterTileRouteWithFallback(config, source, destination);
+    const routed = routeWithGuide(config, source, destination, cell, claimedCoarse, terrainCache, tileCache, { remaining: REFINEMENT_EDGE_EXPANSION_CAP });
+    const finalPath = routed.hasGuide ? routed.path : starterTileRouteWithFallback(config, source, destination);
     return finalPath.length > 1 ? { destination, path: finalPath } : undefined;
   };
+  const claimedCoarse = new Set<string>();
   const reachable: Array<{ settlementId: string; destination: RoadNode; path: WorldCoordinate[] }> = [];
   for (const settlement of settlementCandidates) {
     const gate = [...settlement.accessPoints].sort((a, b) => distance(startPoint, a) - distance(startPoint, b) || a.id.localeCompare(b.id))[0];
     const route = gate ? routeTo({ id: gate.id, ownerId: settlement.id, x: gate.x, y: gate.y, kind: gate.kind, importance: gate.importance }) : undefined;
-    if (route) reachable.push({ settlementId: settlement.id, destination: route.destination, path: route.path });
+    if (route) {
+      reachable.push({ settlementId: settlement.id, destination: route.destination, path: route.path });
+      for (const coarseKey of coarseClaimKeys(route.path)) claimedCoarse.add(coarseKey);
+    }
     if (reachable.length >= 2) break;
   }
   if (reachable.length < 2) {
     const portals = (['north', 'east', 'south', 'west'] as const).map((side) => portalNode(config, cell.gx, cell.gy, side)).sort((a, b) => distance(startPoint, a) - distance(startPoint, b) || a.id.localeCompare(b.id));
     for (const portal of portals) {
       if (reachable.some((item) => item.destination.ownerId === portal.ownerId)) continue;
-      const route = routeTo(portal); if (route) reachable.push({ settlementId: portal.ownerId, destination: route.destination, path: route.path });
+      const route = routeTo(portal);
+      if (route) {
+        reachable.push({ settlementId: portal.ownerId, destination: route.destination, path: route.path });
+        for (const coarseKey of coarseClaimKeys(route.path)) claimedCoarse.add(coarseKey);
+      }
       if (reachable.length >= 2) break;
     }
   }
@@ -402,7 +427,7 @@ function generateLegacyRoadCell(config: WorldConfig, regions: RegionData[], gx: 
 // Kept temporarily as a reference while the topology planner is validated.
 void generateLegacyRoadCell;
 
-export function generateRoadCell(config: WorldConfig, regions: RegionData[], gx: number, gy: number) {
+export function generateRoadCell(config: WorldConfig, regions: RegionData[], gx: number, gy: number, initialClaimedCoarse: ReadonlySet<string> = new Set()) {
   const cell = { gx, gy }; const nodeMap = new Map<string, RoadNode>();
   const gatesByOwner = new Map<string, RoadNode[]>();
   const terrainCache = new Map<string, { fields: ReturnType<typeof fieldsAt>; waterBody: string }>(); const tileCache = new Map<string, ReturnType<typeof tileAtConfig>>();
@@ -438,7 +463,7 @@ export function generateRoadCell(config: WorldConfig, regions: RegionData[], gx:
     if (target) planned.push({ from: portal, to: target });
   }
   const physicalPlanned = assignPhysicalGates(config, planned, gatesByOwner);
-  const claimedCoarse = new Set<string>(); const refinementBudget = { remaining: REFINEMENT_CELL_EXPANSION_CAP }; const segments: RoadSegment[] = [];
+  const claimedCoarse = new Set(initialClaimedCoarse); const refinementBudget = { remaining: REFINEMENT_CELL_EXPANSION_CAP }; const segments: RoadSegment[] = [];
   for (const edge of physicalPlanned) {
     const path = routeWithGuarantee(config, edge.from, edge.to, cell, claimedCoarse, terrainCache, tileCache, refinementBudget);
     const parentId = `${config.seed}:v${config.version}:road:${edge.from.id}|${edge.to.id}`;
