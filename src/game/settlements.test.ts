@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { generateRegion } from './regions';
 import { generateSettlementLayout, type Building, type SettlementLayout } from './settlements';
+import { hydrologyAt } from './hydrology';
 import { createWorldConfig } from './world';
 
 const config = createWorldConfig('EMBERWILD-01');
@@ -25,6 +26,7 @@ describe('organic settlement layouts', () => {
     expect(layout.streets.length).toBeGreaterThan(0);
     for (const street of layout.streets) {
       expect(street.tiles.length).toBeGreaterThan(1);
+      expect(street.tiles.every((tile) => hydrologyAt(config, tile.x, tile.y).waterBody === 'none')).toBe(true);
       for (let index = 1; index < street.tiles.length; index++) expect(Math.abs(street.tiles[index].x - street.tiles[index - 1].x) + Math.abs(street.tiles[index].y - street.tiles[index - 1].y)).toBe(1);
       expect(street.points.length).toBeGreaterThan(1);
     }

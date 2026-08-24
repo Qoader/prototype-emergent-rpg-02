@@ -15,9 +15,10 @@ describe('procedural Emberwild', () => {
   it('is deterministic', () => expect(tileAt('EMBERWILD-01', 11, -8)).toEqual(tileAt('EMBERWILD-01', 11, -8)));
   it('changes with the seed', () => expect(tileAt('EMBERWILD-01', 11, -8)).not.toEqual(tileAt('OTHER', 11, -8)));
   it('does not place trees on coastal tiles', () => {
+    const config = createWorldConfig('EMBERWILD-01', 6);
     const coastal = [];
     for (let y = -96; y <= 96; y += 8) for (let x = -96; x <= 96; x += 8) {
-      const tile = tileAt('EMBERWILD-01', x, y);
+      const tile = tileAtConfig(config, x, y);
       if (tile.terrain === 'shore' || tile.biome === 'coast' || tile.hydrology.shoreline) coastal.push(tile);
     }
     expect(coastal.length).toBeGreaterThan(0);
@@ -28,7 +29,7 @@ describe('procedural Emberwild', () => {
   });
   it('provides deterministic namespaced random access', () => {
     const config = createWorldConfig('EMBERWILD-01');
-    expect(random(config, 'settlement', 12, -4)).toBe(0.5358250746503472);
+    expect(random(config, 'settlement', 12, -4)).toBe(0.13767131697386503);
     expect(random(config, 'settlement', 12, -4)).toBe(random(config, 'settlement', 12, -4));
     expect(random(config, 'settlement', 12, -4)).not.toBe(random(config, 'road', 12, -4));
     expect(random(config, 'settlement', 12, -4)).not.toBe(random(createWorldConfig('OTHER'), 'settlement', 12, -4));
@@ -43,9 +44,9 @@ describe('procedural Emberwild', () => {
   });
   it('creates versioned stable chunk, region, and feature identities', () => {
     const config = createWorldConfig('EMBERWILD-01');
-    expect(chunkKey({ ...config, cx: 2, cy: -3 })).toBe('EMBERWILD-01:v6:chunk:2,-3');
-    expect(regionKey({ ...config, rx: -2, ry: 3 })).toBe('EMBERWILD-01:v6:region:-2,3');
-    expect(featureId(config, 'settlement', 12, -4)).toBe('EMBERWILD-01:v6:settlement:12,-4');
+    expect(chunkKey({ ...config, cx: 2, cy: -3 })).toBe('EMBERWILD-01:v7:chunk:2,-3');
+    expect(regionKey({ ...config, rx: -2, ry: 3 })).toBe('EMBERWILD-01:v7:region:-2,3');
+    expect(featureId(config, 'settlement', 12, -4)).toBe('EMBERWILD-01:v7:settlement:12,-4');
   });
   it('regenerates identical chunk data regardless of request order', () => {
     const config = createWorldConfig('EMBERWILD-01');
@@ -56,6 +57,11 @@ describe('procedural Emberwild', () => {
   });
   it('rejects unsupported tile generator versions explicitly', () => {
     expect(() => tileAtConfig(createWorldConfig('EMBERWILD-01', GENERATOR_VERSION + 1), 0, 0)).toThrow('Unsupported world generator version');
+  });
+  it('continues to accept legacy generator version 6', () => {
+    const config = createWorldConfig('EMBERWILD-01', 6);
+    expect(tileAtConfig(config, 11, -8)).toEqual(tileAtConfig(config, 11, -8));
+    expect(findStartingPosition(config)).toEqual(findStartingPosition(config));
   });
   it('finds the geometric diagonal route', () => {
     const start = findStartingPosition(createWorldConfig('EMBERWILD-01')); const path = findPath('EMBERWILD-01', tileAt('EMBERWILD-01', start.x, start.y), tileAt('EMBERWILD-01', start.x + 3, start.y + 3));

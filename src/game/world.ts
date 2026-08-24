@@ -3,7 +3,8 @@
 export const TILE_SIZE = 40;
 export const CHUNK_SIZE = 24;
 export const REGION_CHUNK_SIZE = 16;
-export const GENERATOR_VERSION = 6;
+export const GENERATOR_VERSION = 7;
+export const SUPPORTED_GENERATOR_VERSIONS = [6, GENERATOR_VERSION] as const;
 export const TREE_LANDMARK_THRESHOLD = 0.84;
 export const STARTER_RADIUS = 2;
 const START_SEARCH_RADIUS = 96;
@@ -56,6 +57,10 @@ function assertInteger(value: number, label: string) {
 
 function floorDiv(value: number, divisor: number) { return Math.floor(value / divisor); }
 
+function assertSupportedGeneratorVersion(config: WorldConfig) {
+  if (!(SUPPORTED_GENERATOR_VERSIONS as readonly number[]).includes(config.version)) throw new Error(`Unsupported world generator version: ${config.version}`);
+}
+
 export function worldToChunk(x: number, y: number): ChunkCoordinate {
   assertInteger(x, 'x'); assertInteger(y, 'y');
   return { cx: floorDiv(x, CHUNK_SIZE), cy: floorDiv(y, CHUNK_SIZE) };
@@ -79,7 +84,7 @@ function starterLand(config: WorldConfig, x: number, y: number) {
 
 /** Finds a stable patch of contiguous land for the player's initial position. */
 export function findStartingPosition(config: WorldConfig): WorldCoordinate {
-  if (config.version !== GENERATOR_VERSION) throw new Error(`Unsupported world generator version: ${config.version}`);
+  assertSupportedGeneratorVersion(config);
   const cacheKey = startingPositionKey(config); const cached = startingPositions.get(cacheKey); if (cached) return { ...cached };
   for (let radius = 0; radius <= START_SEARCH_RADIUS; radius++) {
     const candidates: WorldCoordinate[] = [];
@@ -102,7 +107,7 @@ export function findStartingPosition(config: WorldConfig): WorldCoordinate {
 export function tileAt(seed: string, x: number, y: number): Tile { return tileAtConfig(createWorldConfig(seed), x, y); }
 
 export function tileAtConfig(config: WorldConfig, x: number, y: number): Tile {
-  if (config.version !== GENERATOR_VERSION) throw new Error(`Unsupported world generator version: ${config.version}`);
+  assertSupportedGeneratorVersion(config);
   const fields = fieldsAt(config, x, y); const hydrology = hydrologyAt(config, x, y, fields); return tileFromFields(config, x, y, fields, hydrology);
 }
 

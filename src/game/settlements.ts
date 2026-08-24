@@ -1,5 +1,5 @@
 import { fieldsAt, type GeographicFields } from './fields';
-import { hydrologyAt } from './hydrology';
+import { hydrologyAt, type Direction, type WaterBody } from './hydrology';
 import { random, type WorldConfig, type WorldCoordinate } from './world';
 import type { RegionBounds, SettlementShell } from './regions';
 
@@ -24,13 +24,19 @@ const DIRECTIONS = [[1, 0], [0, 1], [-1, 0], [0, -1]] as const;
 
 function key(x: number, y: number) { return `${x},${y}`; }
 function distance(a: WorldCoordinate, b: WorldCoordinate) { return Math.hypot(a.x - b.x, a.y - b.y); }
-function buildableLand(config: WorldConfig, x: number, y: number) { const fields = fieldsAt(config, x, y); return fields.elevation >= 0.28 && fields.elevation <= 0.76 && fields.slope <= 0.14 && hydrologyAt(config, x, y).waterBody === 'none'; }
+const settlementLandMemo = new Map<string, boolean>();
+const settlementWaterMemo = new Map<string, WaterBody>();
+const settlementFlowMemo = new Map<string, Map<string, Direction | null>>();
+function memoKey(config: WorldConfig, x: number, y: number) { return `${config.seed}:v${config.version}:${x},${y}`; }
+function settlementHydrology(config: WorldConfig, x: number, y: number, fields: GeographicFields) { const cacheKey = memoKey(config, x, y); const cached = settlementWaterMemo.get(cacheKey); if (cached) return cached; const flowKey = `${config.seed}:v${config.version}`; let flowCache = settlementFlowMemo.get(flowKey); if (!flowCache) { flowCache = new Map(); settlementFlowMemo.set(flowKey, flowCache); } const waterBody = hydrologyAt(config, x, y, fields, flowCache).waterBody; if (settlementWaterMemo.size >= 1_000_000) { settlementWaterMemo.clear(); settlementLandMemo.clear(); } settlementWaterMemo.set(cacheKey, waterBody); return waterBody; }
+function buildableLand(config: WorldConfig, x: number, y: number) { const cacheKey = memoKey(config, x, y); const cached = settlementLandMemo.get(cacheKey); if (cached !== undefined) return cached; const fields = fieldsAt(config, x, y); const result = fields.elevation >= 0.28 && fields.elevation <= 0.76 && settlementHydrology(config, x, y, fields) === 'none'; settlementLandMemo.set(cacheKey, result); return result; }
+function routeLand(config: WorldConfig, x: number, y: number, fields: GeographicFields) { if (config.version < 7) return fields.elevation >= 0.28 && fields.elevation <= 0.76 && fields.slope <= 0.14; return buildableLand(config, x, y); }
 function boundsFor(shell: SettlementShell): RegionBounds { const fringe = shell.type === 'city' ? 34 : shell.type === 'town' ? 28 : shell.type === 'village' ? 22 : 15; const radius = shell.radius + fringe; return { minX: Math.floor(shell.x - radius), minY: Math.floor(shell.y - radius), maxX: Math.ceil(shell.x + radius), maxY: Math.ceil(shell.y + radius) }; }
 export function settlementLayoutBounds(shell: SettlementShell) { return boundsFor(shell); }
 function inBounds(point: WorldCoordinate, bounds: RegionBounds) { return point.x >= bounds.minX && point.x <= bounds.maxX && point.y >= bounds.minY && point.y <= bounds.maxY; }
 function stablePoints(points: WorldCoordinate[]) { return points.filter((point, index) => index === 0 || point.x !== points[index - 1].x || point.y !== points[index - 1].y); }
 
-function route(config: WorldConfig, shell: SettlementShell, start: WorldCoordinate, target: WorldCoordinate, existing: Set<string>, fieldCache: Map<string, GeographicFields>) {
+function route(config: WorldConfig, shell: SettlementShell, start: WorldCoordinate, target: WorldCoordinate, existing: Set<string>, fieldCache: Map<string, GeographicFields>, landCache: Map<string, boolean>, avoidWater: boolean) {
   const bounds = boundsFor(shell); const frontier = new SearchHeap(); frontier.push({ ...start, score: 0 }); const cost = new Map<string, number>([[key(start.x, start.y), 0]]); const cameFrom = new Map<string, string | null>([[key(start.x, start.y), null]]);
   const fieldsAtPoint = (x: number, y: number) => { const cacheKey = key(x, y); const cached = fieldCache.get(cacheKey); if (cached) return cached; const fields = fieldsAt(config, x, y); fieldCache.set(cacheKey, fields); return fields; };
   while (frontier.length) {
@@ -38,7 +44,7 @@ function route(config: WorldConfig, shell: SettlementShell, start: WorldCoordina
     if (current.x === target.x && current.y === target.y) break;
     for (const [dx, dy] of DIRECTIONS) {
       const x = current.x + dx; const y = current.y + dy; if (!inBounds({ x, y }, bounds)) continue;
-      const fields = fieldsAtPoint(x, y); const walkable = fields.elevation >= 0.28 && fields.elevation <= 0.76 && fields.slope <= 0.14; if (!walkable) continue;
+      const fields = fieldsAtPoint(x, y); const terrainKey = key(x, y); let walkable = fields.elevation >= 0.28 && fields.elevation <= 0.76 && fields.slope <= 0.14; if (avoidWater) { walkable = landCache.get(terrainKey) ?? routeLand(config, x, y, fields); landCache.set(terrainKey, walkable); } if (!walkable) continue;
       const movementCost = fields.slope > 0.08 || fields.roughness > 0.65 ? 2.2 : 1; const nextKey = key(x, y); const nextCost = (cost.get(key(current.x, current.y)) ?? Infinity) + (existing.has(nextKey) ? 0.35 : movementCost) + (1 + Math.abs(x * 17 + y * 31) % 7) * 0.01;
       if (nextCost < (cost.get(nextKey) ?? Infinity)) { cost.set(nextKey, nextCost); cameFrom.set(nextKey, key(current.x, current.y)); frontier.push({ x, y, score: nextCost + Math.abs(x - target.x) + Math.abs(y - target.y) }); }
     }
@@ -47,6 +53,10 @@ function route(config: WorldConfig, shell: SettlementShell, start: WorldCoordina
   const path: WorldCoordinate[] = []; let cursor: string | null = targetKey;
   while (cursor) { const [x, y] = cursor.split(',').map(Number); path.unshift({ x, y }); cursor = cameFrom.get(cursor) ?? null; }
   return path;
+}
+
+function routeWithoutWater(config: WorldConfig, shell: SettlementShell, start: WorldCoordinate, target: WorldCoordinate, existing: Set<string>, fieldCache: Map<string, GeographicFields>, landCache: Map<string, boolean>) {
+  const candidate = route(config, shell, start, target, existing, fieldCache, landCache, false); if (config.version < 7 || candidate.every((point) => { const fields = fieldCache.get(key(point.x, point.y)) ?? fieldsAt(config, point.x, point.y); fieldCache.set(key(point.x, point.y), fields); return routeLand(config, point.x, point.y, fields); })) return candidate; return route(config, shell, start, target, existing, fieldCache, landCache, true);
 }
 
 function smoothPath(path: WorldCoordinate[]): WorldPoint[] { const points = stablePoints(path).map((point) => ({ x: point.x + 0.5, y: point.y + 0.5 })); if (points.length < 3) return points; const result: WorldPoint[] = [points[0]]; for (let index = 1; index < points.length - 1; index++) result.push({ x: points[index].x * 0.25 + points[index - 1].x * 0.375 + points[index + 1].x * 0.375, y: points[index].y * 0.25 + points[index - 1].y * 0.375 + points[index + 1].y * 0.375 }); result.push(points.at(-1)!); return result; }
@@ -67,11 +77,11 @@ function buildingType(district: DistrictType, index: number): BuildingType { if 
 function overlaps(a: Building, b: Building) { return Math.abs(a.x - b.x) < (a.width + b.width) / 2 + 1 && Math.abs(a.y - b.y) < (a.height + b.height) / 2 + 1; }
 
 export function generateSettlementLayout(config: WorldConfig, shell: SettlementShell): SettlementLayout {
-  const bounds = boundsFor(shell); const districts = districtSet(config, shell); const streetTiles = new Set<string>(); const fieldCache = new Map<string, GeographicFields>(); const streets: SettlementStreet[] = []; const connections = [{ id: `${shell.id}:main:center-market`, target: shell.anchors.find((anchor) => anchor.type === 'market') }, ...shell.accessPoints.map((endpoint) => ({ id: endpoint.id, target: endpoint }))].filter((connection) => connection.target).sort((a, b) => a.id.localeCompare(b.id));
+  const bounds = boundsFor(shell); const districts = districtSet(config, shell); const streetTiles = new Set<string>(); const fieldCache = new Map<string, GeographicFields>(); const landCache = new Map<string, boolean>(); const streets: SettlementStreet[] = []; const connections = [{ id: `${shell.id}:main:center-market`, target: shell.anchors.find((anchor) => anchor.type === 'market') }, ...shell.accessPoints.map((endpoint) => ({ id: endpoint.id, target: endpoint }))].filter((connection) => connection.target).sort((a, b) => a.id.localeCompare(b.id));
   const center = { x: shell.x, y: shell.y };
-  for (const connection of connections) { const target = connection.target!; const path = route(config, shell, center, target, streetTiles, fieldCache); if (path.length < 2) continue; path.forEach((point) => streetTiles.add(key(point.x, point.y))); streets.push({ id: connection.id, type: 'main', tiles: path, points: smoothPath(path), width: shell.type === 'city' ? 3 : 2 }); }
+  for (const connection of connections) { const target = connection.target!; const path = routeWithoutWater(config, shell, center, target, streetTiles, fieldCache, landCache); if (path.length < 2) continue; path.forEach((point) => streetTiles.add(key(point.x, point.y))); streets.push({ id: connection.id, type: 'main', tiles: path, points: smoothPath(path), width: shell.type === 'city' ? 3 : 2 }); }
   const budget = shell.type === 'city' ? 30 : shell.type === 'town' ? 16 : shell.type === 'village' ? 8 : 3; const mainTiles = [...streetTiles].map((value) => { const [x, y] = value.split(',').map(Number); return { x, y }; });
-  for (let index = 0; index < budget; index++) { if (!mainTiles.length) break; const base = mainTiles[Math.floor(random(config, 'settlement:branch-base', shell.id, index) * mainTiles.length)]; const angle = random(config, 'settlement:branch-angle', shell.id, index) * Math.PI * 2; const length = 4 + Math.floor(random(config, 'settlement:branch-length', shell.id, index) * Math.max(4, shell.radius * 0.5)); const target = { x: Math.round(base.x + Math.cos(angle) * length), y: Math.round(base.y + Math.sin(angle) * length) }; if (!inBounds(target, bounds)) continue; const path = route(config, shell, base, target, streetTiles, fieldCache); if (path.length < 3) continue; path.forEach((point) => streetTiles.add(key(point.x, point.y))); streets.push({ id: `${shell.id}:secondary:${index}`, type: index % 3 === 0 ? 'lane' : 'secondary', tiles: path, points: smoothPath(path), width: 1 }); }
+  for (let index = 0; index < budget; index++) { if (!mainTiles.length) break; const base = mainTiles[Math.floor(random(config, 'settlement:branch-base', shell.id, index) * mainTiles.length)]; const angle = random(config, 'settlement:branch-angle', shell.id, index) * Math.PI * 2; const length = 4 + Math.floor(random(config, 'settlement:branch-length', shell.id, index) * Math.max(4, shell.radius * 0.5)); const target = { x: Math.round(base.x + Math.cos(angle) * length), y: Math.round(base.y + Math.sin(angle) * length) }; if (!inBounds(target, bounds)) continue; const path = routeWithoutWater(config, shell, base, target, streetTiles, fieldCache, landCache); if (path.length < 3) continue; path.forEach((point) => streetTiles.add(key(point.x, point.y))); streets.push({ id: `${shell.id}:secondary:${index}`, type: index % 3 === 0 ? 'lane' : 'secondary', tiles: path, points: smoothPath(path), width: 1 }); }
   const buildings: Building[] = []; const occupiedStreet = new Set(streetTiles); const buildingBudget = shell.type === 'city' ? 70 : shell.type === 'town' ? 42 : shell.type === 'village' ? 24 : 10;
   const required: Array<{ type: BuildingType; x: number; y: number; district: District }> = [{ type: shell.type === 'hamlet' || shell.type === 'village' ? 'house' : 'keep', x: shell.x, y: shell.y, district: districts[0] }]; const market = shell.anchors.find((anchor) => anchor.type === 'market'); if (market) required.push({ type: 'market', x: market.x, y: market.y, district: districts.find((district) => district.type === 'market') ?? districts[0] });
   for (const [index, item] of required.entries()) if (buildableLand(config, item.x, item.y)) buildings.push({ id: `${shell.id}:building:anchor:${index}`, type: item.type, districtId: item.district.id, x: item.x, y: item.y, width: 1, height: 1, rotation: 0, roadId: null, courtyard: false });
