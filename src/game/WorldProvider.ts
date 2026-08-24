@@ -2,17 +2,7 @@ import { chunkAt, CHUNK_SIZE, REGION_CHUNK_SIZE, regionKey, findStartingPosition
 import { featureIntersectsBounds, generateRegion, type LandmarkAnchor, type RegionData, type ResourceAnchor, type RoadEndpoint, type SettlementShell } from './regions';
 import { generateSettlementLayout, layoutIntersectsBounds, settlementLayoutBounds, type SettlementLayout } from './settlements';
 import { generateRoadCell, generateStarterRoad, roadSegmentIntersectsBounds, ROAD_NETWORK_VERSION, roadGraphCell, starterClaimsForCell, type RoadNetwork, type RoadSegment } from './roads';
-
-interface CacheEntry<T> { value: T; }
-
-class LruCache<T> {
-  private entries = new Map<string, CacheEntry<T>>(); hits = 0; misses = 0;
-  constructor(private capacity: number) { if (!Number.isInteger(capacity) || capacity < 1) throw new Error('Cache capacity must be a positive integer'); }
-  get(key: string) { const entry = this.entries.get(key); if (!entry) { this.misses++; return undefined; } this.entries.delete(key); this.entries.set(key, entry); this.hits++; return entry.value; }
-  set(key: string, value: T) { this.entries.delete(key); this.entries.set(key, { value }); while (this.entries.size > this.capacity) this.entries.delete(this.entries.keys().next().value!); }
-  clear() { this.entries.clear(); }
-  get size() { return this.entries.size; }
-}
+import { LruCache } from './LruCache';
 
 export interface WorldProviderOptions { chunkCapacity?: number; regionCapacity?: number; roadCapacity?: number; layoutCapacity?: number; }
 export interface WorldProviderStats { chunks: { size: number; hits: number; misses: number }; regions: { size: number; hits: number; misses: number }; roads: { size: number; hits: number; misses: number }; layouts: { size: number; hits: number; misses: number }; inFlightChunks: number; inFlightRegions: number; inFlightRoads: number; inFlightLayouts: number; }

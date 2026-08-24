@@ -1,11 +1,6 @@
 import type { WorldChunk, WorldConfig } from './world';
 import type { WorldProviderOptions } from './WorldProvider';
-
-type Response =
-  | { type: 'ready' }
-  | { type: 'chunk'; requestId: number; chunk: WorldChunk; elapsedMs: number }
-  | { type: 'error'; requestId?: number; message: string }
-  | { type: 'disposed' };
+import type { WorldWorkerResponse } from './worldWorkerProtocol';
 
 interface Pending { resolve: (chunk: WorldChunk) => void; reject: (error: Error) => void; }
 
@@ -22,11 +17,11 @@ export class WorldWorkerClient {
     this.worker = new Worker(new URL('./world.worker.ts', import.meta.url), { type: 'module' });
     this.ready = new Promise<void>((resolve, reject) => { this.readyResolve = resolve; this.readyReject = reject; });
     this.readyTimer = setTimeout(() => this.fail(new Error('World worker initialization timed out')), 8000);
-    this.worker.onmessage = (event: MessageEvent<Response>) => this.handle(event.data);
+    this.worker.onmessage = (event: MessageEvent<WorldWorkerResponse>) => this.handle(event.data);
     this.worker.onerror = () => this.fail(new Error('World worker failed to initialize'));
     this.worker.postMessage({ type: 'init', config, options });
   }
-  private handle(message: Response) {
+  private handle(message: WorldWorkerResponse) {
     if (message.type === 'ready') { clearTimeout(this.readyTimer); this.readyResolve(); return; }
     if (message.type === 'error' && message.requestId === undefined) { this.fail(new Error(message.message)); return; }
     if (message.type === 'chunk') { const pending = this.pending.get(message.requestId); if (!pending) return; this.pending.delete(message.requestId); pending.resolve(message.chunk); }

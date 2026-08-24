@@ -1,19 +1,13 @@
 import { WorldProvider } from './WorldProvider';
-import type { WorldProviderOptions } from './WorldProvider';
-import type { WorldConfig, WorldChunk } from './world';
-
-type Request =
-  | { type: 'init'; config: WorldConfig; options?: WorldProviderOptions }
-  | { type: 'getChunk'; requestId: number; cx: number; cy: number }
-  | { type: 'clear' }
-  | { type: 'dispose' };
+import type { WorldChunk } from './world';
+import type { WorldWorkerRequest } from './worldWorkerProtocol';
 
 let provider: WorldProvider | undefined;
 let disposed = false;
 
 const post = (message: unknown) => self.postMessage(message);
 
-self.onmessage = (event: MessageEvent<Request>) => {
+self.onmessage = (event: MessageEvent<WorldWorkerRequest>) => {
   const message = event.data;
   if (message.type === 'init') {
     try { provider = new WorldProvider(message.config, message.options); disposed = false; post({ type: 'ready' }); }

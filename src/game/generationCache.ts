@@ -1,32 +1,9 @@
 import type { GeographicFields } from './fields';
 import type { Direction, Hydrology } from './hydrology';
 import type { WorldConfig } from './world';
+import { LruCache } from './LruCache';
 
 type CacheKeyPart = string | number;
-
-class LruCache<T> {
-  private entries = new Map<string, T>();
-
-  constructor(private readonly capacity: number) {}
-
-  get(key: string) {
-    const value = this.entries.get(key);
-    if (value === undefined) return undefined;
-    this.entries.delete(key);
-    this.entries.set(key, value);
-    return value;
-  }
-
-  has(key: string) { return this.entries.has(key); }
-
-  set(key: string, value: T) {
-    this.entries.delete(key);
-    this.entries.set(key, value);
-    while (this.entries.size > this.capacity) this.entries.delete(this.entries.keys().next().value!);
-  }
-
-  clear() { this.entries.clear(); }
-}
 
 function serialize(value: CacheKeyPart) {
   return typeof value === 'number' && Object.is(value, -0) ? '-0' : String(value);
@@ -54,7 +31,8 @@ export function setCachedHydrology(config: WorldConfig, x: number, y: number, hy
 
 export function getCachedRiverFlow(config: WorldConfig, cx: number, cy: number) {
   const key = coordinateKey(config, 'river-flow', cx, cy);
-  return riverFlowCache.has(key) ? { hit: true, value: riverFlowCache.get(key)! } : { hit: false, value: null };
+  const value = riverFlowCache.get(key);
+  return value === undefined ? { hit: false, value: null } : { hit: true, value };
 }
 export function setCachedRiverFlow(config: WorldConfig, cx: number, cy: number, flow: Direction | null) { riverFlowCache.set(coordinateKey(config, 'river-flow', cx, cy), flow); }
 
