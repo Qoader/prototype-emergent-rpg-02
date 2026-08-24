@@ -79,7 +79,7 @@ function startingPositionKey(config: WorldConfig) { return `${config.seed}:v${co
 
 function starterLand(config: WorldConfig, x: number, y: number) {
   const fields = fieldsAt(config, x, y);
-  return fields.elevation >= 0.28 && fields.elevation <= 0.76 && fields.slope <= 0.14 && hydrologyAt(config, x, y, fields).waterBody === 'none';
+  return fields.elevation >= 0.28 && fields.elevation <= 0.76 && fields.slope <= 0.14 && hydrologyAt(config, x, y).waterBody === 'none';
 }
 
 /** Finds a stable patch of contiguous land for the player's initial position. */
@@ -108,7 +108,7 @@ export function tileAt(seed: string, x: number, y: number): Tile { return tileAt
 
 export function tileAtConfig(config: WorldConfig, x: number, y: number): Tile {
   assertSupportedGeneratorVersion(config);
-  const fields = fieldsAt(config, x, y); const hydrology = hydrologyAt(config, x, y, fields); return tileFromFields(config, x, y, fields, hydrology);
+  const fields = fieldsAt(config, x, y); const hydrology = hydrologyAt(config, x, y); return tileFromFields(config, x, y, fields, hydrology);
 }
 
 function tileFromFields(config: WorldConfig, x: number, y: number, fields: ReturnType<typeof fieldsAt>, hydrology: Hydrology): Tile {
@@ -144,9 +144,8 @@ export function classifyBiome(fields: ReturnType<typeof fieldsAt>, terrain: Terr
 export function chunkAt(config: WorldConfig, cx: number, cy: number): WorldChunk {
   assertInteger(cx, 'cx'); assertInteger(cy, 'cy');
   const tiles: Tile[] = [];
-  const flowCache = new Map<string, import('./hydrology').Direction | null>();
   for (let y = 0; y < CHUNK_SIZE; y++) for (let x = 0; x < CHUNK_SIZE; x++) {
-    const worldX = cx * CHUNK_SIZE + x; const worldY = cy * CHUNK_SIZE + y; const fields = fieldsAt(config, worldX, worldY); const hydrology = hydrologyAt(config, worldX, worldY, fields, flowCache); tiles.push(tileFromFields(config, worldX, worldY, fields, hydrology));
+    const worldX = cx * CHUNK_SIZE + x; const worldY = cy * CHUNK_SIZE + y; const fields = fieldsAt(config, worldX, worldY); const hydrology = hydrologyAt(config, worldX, worldY); tiles.push(tileFromFields(config, worldX, worldY, fields, hydrology));
   }
   return { cx, cy, tiles, settlements: [], settlementLayouts: [], landmarks: [], resources: [], roadEndpoints: [], roads: [] };
 }

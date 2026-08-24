@@ -1,6 +1,7 @@
 import { DEFAULT_FIELD_TUNING, fieldsAt, type GeographicFields } from './fields';
 import { sampleValueNoise } from './noise';
 import { random, type WorldConfig } from './world';
+import { getCachedHydrology, getCachedQuickFields, getCachedRiverFlow, setCachedHydrology, setCachedQuickFields, setCachedRiverFlow } from './generationCache';
 
 export const HYDROLOGY_CELL_SIZE = 8;
 export type WaterBody = 'none' | 'ocean' | 'lake' | 'river';
@@ -17,7 +18,13 @@ const SOURCE_ELEVATION = 0.62;
 const MAX_RIVER_CELLS = 64;
 const SOURCE_SEARCH_RADIUS = 2;
 
-function quickFields(config: WorldConfig, x: number, y: number) { return { elevation: sampleValueNoise(config, 'field:elevation', x, y, DEFAULT_FIELD_TUNING.elevation), moisture: sampleValueNoise(config, 'field:moisture', x, y, DEFAULT_FIELD_TUNING.moisture) }; }
+function quickFields(config: WorldConfig, x: number, y: number) {
+  const cached = getCachedQuickFields(config, x, y);
+  if (cached) return cached;
+  const fields = { elevation: sampleValueNoise(config, 'field:elevation', x, y, DEFAULT_FIELD_TUNING.elevation), moisture: sampleValueNoise(config, 'field:moisture', x, y, DEFAULT_FIELD_TUNING.moisture) };
+  setCachedQuickFields(config, x, y, fields);
+  return fields;
+}
 function cellFields(config: WorldConfig, cx: number, cy: number) { return quickFields(config, cx * HYDROLOGY_CELL_SIZE + HYDROLOGY_CELL_SIZE / 2, cy * HYDROLOGY_CELL_SIZE + HYDROLOGY_CELL_SIZE / 2); }
 function cellElevation(config: WorldConfig, cx: number, cy: number) { return cellFields(config, cx, cy).elevation; }
 
@@ -65,12 +72,21 @@ function riverFlowAt(config: WorldConfig, targetX: number, targetY: number) {
 }
 
 export function hydrologyAt(config: WorldConfig, x: number, y: number, knownFields?: GeographicFields, flowCache?: Map<string, Direction | null>): Hydrology {
+  if (!knownFields) {
+    const cached = getCachedHydrology(config, x, y);
+    if (cached) return { ...cached };
+  }
   const fields = knownFields ?? fieldsAt(config, x, y); const baseWater = waterBodyAt(config, fields, x, y);
-  const flowKey = `${Math.floor(x / HYDROLOGY_CELL_SIZE)},${Math.floor(y / HYDROLOGY_CELL_SIZE)}`;
+  const flowX = Math.floor(x / HYDROLOGY_CELL_SIZE); const flowY = Math.floor(y / HYDROLOGY_CELL_SIZE); const flowKey = `${flowX},${flowY}`;
   let flowDirection: Direction | null = null;
   if (baseWater === 'none') {
     if (flowCache?.has(flowKey)) flowDirection = flowCache.get(flowKey) ?? null;
-    else { flowDirection = riverFlowAt(config, x, y); flowCache?.set(flowKey, flowDirection); }
+    else {
+      const cachedFlow = getCachedRiverFlow(config, flowX, flowY);
+      flowDirection = cachedFlow.hit ? cachedFlow.value : riverFlowAt(config, x, y);
+      setCachedRiverFlow(config, flowX, flowY, flowDirection);
+      flowCache?.set(flowKey, flowDirection);
+    }
   }
   const waterBody: WaterBody = flowDirection ? 'river' : baseWater;
   let shoreline = false;
@@ -78,5 +94,7 @@ export function hydrologyAt(config: WorldConfig, x: number, y: number, knownFiel
     const neighborPoint = quickFields(config, x + point.dx, y + point.dy); const neighbor = { ...neighborPoint, temperature: 0, fertility: 0, roughness: 0, slope: 0 }; const neighborWater = waterBodyAt(config, neighbor, x + point.dx, y + point.dy);
     if (neighborWater !== 'none') { shoreline = true; break; }
   }
-  return { waterBody, flowDirection, shoreline };
+  const result = { waterBody, flowDirection, shoreline };
+  if (!knownFields) setCachedHydrology(config, x, y, result);
+  return { ...result };
 }

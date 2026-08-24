@@ -1,4 +1,5 @@
 import { sampleValueNoise, type NoiseSettings } from './noise';
+import { getCachedFields, setCachedFields } from './generationCache';
 import type { WorldConfig } from './world';
 
 export interface FieldTuning {
@@ -50,6 +51,11 @@ function elevationAt(config: WorldConfig, x: number, y: number, tuning: FieldTun
 
 export function fieldsAt(config: WorldConfig, x: number, y: number, tuning = DEFAULT_FIELD_TUNING): GeographicFields {
   assertCoordinate(x, 'x'); assertCoordinate(y, 'y');
+  const cacheable = tuning === DEFAULT_FIELD_TUNING;
+  if (cacheable) {
+    const cached = getCachedFields(config, x, y);
+    if (cached) return { ...cached };
+  }
   const elevation = elevationAt(config, x, y, tuning);
   const moisture = sampleValueNoise(config, 'field:moisture', x, y, tuning.moisture);
   const temperatureNoise = sampleValueNoise(config, 'field:temperature', x, y, tuning.temperature);
@@ -62,7 +68,9 @@ export function fieldsAt(config: WorldConfig, x: number, y: number, tuning = DEF
   const horizontalSlope = Math.abs(elevationAt(config, x + 1, y, tuning) - elevationAt(config, x - 1, y, tuning));
   const verticalSlope = Math.abs(elevationAt(config, x, y + 1, tuning) - elevationAt(config, x, y - 1, tuning));
   const slope = clamp(horizontalSlope + verticalSlope);
-  return { elevation, moisture, temperature, fertility, roughness, slope };
+  const fields = { elevation, moisture, temperature, fertility, roughness, slope };
+  if (cacheable) setCachedFields(config, x, y, fields);
+  return { ...fields };
 }
 
 export function fieldAt(config: WorldConfig, field: FieldName, x: number, y: number, tuning = DEFAULT_FIELD_TUNING) {

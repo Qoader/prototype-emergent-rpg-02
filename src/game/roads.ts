@@ -126,7 +126,7 @@ function coarseRoute(config: WorldConfig, from: RoadNode, to: RoadNode, cell: { 
   }
   const result: WorldCoordinate[] = []; let cursor: string | null = key(target.x, target.y); if (!came.has(cursor)) return [];
   while (cursor) { const [x, y] = cursor.split(',').map(Number); result.unshift({ x: x * COARSE_CELL_SIZE + 4, y: y * COARSE_CELL_SIZE + 4 }); cursor = came.get(cursor) ?? null; }
-  const expanded: WorldCoordinate[] = [from, ...result, to];
+  const expanded: WorldCoordinate[] = [{ x: from.x, y: from.y }, ...result, { x: to.x, y: to.y }];
   const validTile = (point: WorldCoordinate) => { if (mode === 'fallback') return true; const tileKey = `${point.x},${point.y}`; let tile = tileCache.get(tileKey); if (!tile) { tile = tileAtConfig(config, point.x, point.y); tileCache.set(tileKey, tile); } return tile.walkable; };
   const path: WorldCoordinate[] = [];
   for (let index = 0; index < expanded.length - 1; index++) { const a = expanded[index]; const b = expanded[index + 1]; const steps = Math.max(Math.abs(b.x - a.x), Math.abs(b.y - a.y)); for (let step = 0; step <= steps; step++) { const point = { x: Math.round(a.x + (b.x - a.x) * step / Math.max(1, steps)), y: Math.round(a.y + (b.y - a.y) * step / Math.max(1, steps)) }; if (!validTile(point)) return []; path.push(point); } }
@@ -290,6 +290,7 @@ export function generateStarterRoad(config: WorldConfig, startPoint: WorldCoordi
   const routeTo = (destination: RoadNode) => {
     const routed = routeWithGuide(config, source, destination, cell, claimedCoarse, terrainCache, tileCache, { remaining: REFINEMENT_EDGE_EXPANSION_CAP });
     const finalPath = routed.hasGuide ? routed.path : starterTileRouteWithFallback(config, source, destination);
+    if (finalPath.length && finalPath[0].x === source.x && finalPath[0].y === source.y) finalPath[0] = { x: source.x, y: source.y };
     return finalPath.length > 1 ? { destination, path: finalPath } : undefined;
   };
   const claimedCoarse = new Set<string>();

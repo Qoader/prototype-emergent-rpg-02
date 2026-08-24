@@ -3,7 +3,7 @@ import { DEFAULT_FIELD_TUNING, fieldAt, fieldsAt, sampleFieldGrid } from './fiel
 import { sampleValueNoise } from './noise';
 import { createWorldConfig } from './world';
 
-const config = createWorldConfig('EMBERWILD-01');
+const config = createWorldConfig('EMBERWILD-01', 6);
 
 describe('continuous geographic fields', () => {
   it('is deterministic and changes with the seed', () => {
