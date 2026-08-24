@@ -19,7 +19,7 @@ import type { RoadSegment, RoadNetwork } from './roads';
 export type Terrain = 'deep-water' | 'shallow-water' | 'shore' | 'plain' | 'hill' | 'mountain' | 'river' | 'starter-ground';
 export type Biome = 'ocean' | 'lake' | 'coast' | 'grassland' | 'forest' | 'swamp' | 'desert' | 'tundra' | 'alpine';
 export type Landmark = 'tree' | 'ruin' | 'shrine' | null;
-export interface Tile { x: number; y: number; terrain: Terrain; biome: Biome; hydrology: Hydrology; elevation: number; movementCost: number; landmark: Landmark; walkable: boolean; road: boolean; }
+export interface Tile { x: number; y: number; terrain: Terrain; biome: Biome; hydrology: Hydrology; elevation: number; movementCost: number; landmark: Landmark; walkable: boolean; road: boolean; port: boolean; waterRoute: boolean; }
 export interface WorldConfig { seed: string; version: number; }
 export interface WorldCoordinate { x: number; y: number; }
 export interface ChunkCoordinate { cx: number; cy: number; }
@@ -126,7 +126,7 @@ function tileFromFields(config: WorldConfig, x: number, y: number, fields: Retur
   const movementCost = terrain === 'starter-ground' || terrain === 'plain' ? 1 : terrain === 'shore' ? 1.5 : biome === 'forest' ? 1.8 : biome === 'swamp' ? 2.5 : biome === 'desert' ? 1.4 : biome === 'tundra' ? 1.8 : terrain === 'hill' ? 2.2 : Infinity;
   const detail = random(config, 'landmark', x, y); const coastal = terrain === 'shore' || biome === 'coast' || hydrology.shoreline;
   const landmark = walkable && detail > SHRINE_DETAIL_THRESHOLD ? 'shrine' : walkable && detail > RUIN_DETAIL_THRESHOLD ? 'ruin' : walkable && !coastal && detail > TREE_LANDMARK_THRESHOLD ? 'tree' : null;
-  return { x, y, terrain, biome, hydrology, elevation: fields.elevation, movementCost, landmark, walkable, road: false };
+  return { x, y, terrain, biome, hydrology, elevation: fields.elevation, movementCost, landmark, walkable, road: false, port: false, waterRoute: false };
 }
 
 export function classifyBiome(fields: ReturnType<typeof fieldsAt>, terrain: Terrain, waterBody: Hydrology['waterBody']): Biome {
@@ -161,25 +161,40 @@ class PathHeap {
   get size() { return this.values.length; }
   private compare(a: PathEntry, b: PathEntry) { return a.priority - b.priority || a.cost - b.cost || key(a.tile.x, a.tile.y).localeCompare(key(b.tile.x, b.tile.y)); }
 }
-export interface PathOptions { maxExpandedNodes?: number; maxPathLength?: number; roadTileKeys?: ReadonlySet<string>; blockedTileKeys?: ReadonlySet<string>; }
+export interface PathOptions { maxExpandedNodes?: number; maxPathLength?: number; roadTileKeys?: ReadonlySet<string>; bridgeTileKeys?: ReadonlySet<string>; blockedTileKeys?: ReadonlySet<string>; waterRouteTileKeys?: ReadonlySet<string>; portTileKeys?: ReadonlySet<string>; portLinks?: ReadonlyMap<string, ReadonlySet<string>>; }
 export function findPath(seed: string, start: Tile, target: Tile, roadNetwork?: RoadNetwork, options: PathOptions = {}): Tile[] {
   const roadTiles = new Set(options.roadTileKeys ?? []);
   const blockedTiles = options.blockedTileKeys ?? new Set<string>();
+  const waterRouteTiles = options.waterRouteTileKeys ?? new Set<string>();
+  const bridgeTiles = options.bridgeTileKeys ?? new Set<string>();
+  const portTileKeys = options.portTileKeys ?? new Set<string>();
+  const portLinks = options.portLinks ?? new Map<string, ReadonlySet<string>>();
   for (const segment of roadNetwork?.segments ?? []) for (const tile of segment.tiles) roadTiles.add(key(tile.x, tile.y));
   for (const segment of roadNetwork?.segments ?? []) for (const bridge of segment.bridges) for (const tile of bridge.tiles) roadTiles.add(key(tile.x, tile.y));
-  const traversable = (tile: Tile, tileKey = key(tile.x, tile.y)) => !blockedTiles.has(tileKey) && (tile.walkable || roadTiles.has(tileKey));
+  const traversable = (tile: Tile, tileKey = key(tile.x, tile.y)) => {
+    if (blockedTiles.has(tileKey)) return false;
+    if (tile.hydrology.waterBody === 'ocean' || tile.hydrology.waterBody === 'lake') return waterRouteTiles.has(tileKey) || bridgeTiles.has(tileKey);
+    if (tile.hydrology.waterBody === 'river') return bridgeTiles.has(tileKey);
+    return portTileKeys.has(tileKey) || tile.walkable || roadTiles.has(tileKey);
+  };
+  const transitionAllowed = (from: Tile, to: Tile) => {
+    const fromKey = key(from.x, from.y); const toKey = key(to.x, to.y);
+    const fromWater = waterRouteTiles.has(fromKey); const toWater = waterRouteTiles.has(toKey);
+    if (fromWater === toWater) return true;
+    return fromWater ? Boolean(portLinks.get(toKey)?.has(fromKey)) : Boolean(portLinks.get(fromKey)?.has(toKey));
+  };
   const tileCache = new Map<string, Tile>(); const getTile = (x: number, y: number) => { const tileKey = key(x, y); const cached = tileCache.get(tileKey); if (cached) return cached; const tile = tileAt(seed, x, y); tileCache.set(tileKey, tile); return tile; };
   const startChunk = worldToChunk(start.x, start.y); const minX = (startChunk.cx - 1) * CHUNK_SIZE; const minY = (startChunk.cy - 1) * CHUNK_SIZE; const maxX = (startChunk.cx + 2) * CHUNK_SIZE - 1; const maxY = (startChunk.cy + 2) * CHUNK_SIZE - 1;
   const boundedTarget = { x: Math.max(minX, Math.min(maxX, target.x)), y: Math.max(minY, Math.min(maxY, target.y)) };
-  const targetKey = key(boundedTarget.x, boundedTarget.y); const effectiveTarget = target.x === boundedTarget.x && target.y === boundedTarget.y ? target : getTile(boundedTarget.x, boundedTarget.y); const targetBlocked = !traversable(effectiveTarget, targetKey);
+  const targetKey = key(boundedTarget.x, boundedTarget.y); const effectiveTarget = target.x === boundedTarget.x && target.y === boundedTarget.y ? target : getTile(boundedTarget.x, boundedTarget.y); const targetBlocked = !traversable(effectiveTarget, targetKey); const targetIsUnservedWater = !waterRouteTiles.has(targetKey) && (effectiveTarget.hydrology.waterBody === 'ocean' || effectiveTarget.hydrology.waterBody === 'lake');
   let searchTarget = boundedTarget;
   if (targetBlocked) {
     for (let radius = 1; radius <= Math.max(maxX - minX, maxY - minY) && searchTarget === boundedTarget; radius++) {
       for (let x = boundedTarget.x - radius; x <= boundedTarget.x + radius; x++) for (const y of [boundedTarget.y - radius, boundedTarget.y + radius]) {
-        if (x < minX || x > maxX || y < minY || y > maxY) continue; const candidate = getTile(x, y); if (traversable(candidate)) { searchTarget = { x, y }; break; }
+        if (x < minX || x > maxX || y < minY || y > maxY) continue; const candidate = getTile(x, y); if (traversable(candidate) && (!targetIsUnservedWater || !waterRouteTiles.has(key(x, y)))) { searchTarget = { x, y }; break; }
       }
       for (let y = boundedTarget.y - radius + 1; y < boundedTarget.y + radius && searchTarget === boundedTarget; y++) for (const x of [boundedTarget.x - radius, boundedTarget.x + radius]) {
-        if (x < minX || x > maxX || y < minY || y > maxY) continue; const candidate = getTile(x, y); if (traversable(candidate)) { searchTarget = { x, y }; break; }
+        if (x < minX || x > maxX || y < minY || y > maxY) continue; const candidate = getTile(x, y); if (traversable(candidate) && (!targetIsUnservedWater || !waterRouteTiles.has(key(x, y)))) { searchTarget = { x, y }; break; }
       }
     }
   }
@@ -188,7 +203,7 @@ export function findPath(seed: string, start: Tile, target: Tile, roadNetwork?: 
     const entry = frontier.pop()!; const current = entry.tile; const currentKey = key(current.x, current.y); if (entry.cost !== cost.get(currentKey)) continue; if (currentKey === searchTargetKey) break;
     for (const point of neighbors(current)) {
       if (point.x < minX || point.x > maxX || point.y < minY || point.y > maxY) continue;
-      const next = getTile(point.x, point.y); const nextKey = key(next.x, next.y); if (!traversable(next, nextKey) || (nextKey === targetKey && targetBlocked)) continue;
+      const next = getTile(point.x, point.y); const nextKey = key(next.x, next.y); if (!traversable(next, nextKey) || !transitionAllowed(current, next) || (nextKey === targetKey && targetBlocked)) continue;
       const diagonal = point.x !== current.x && point.y !== current.y;
       if (diagonal && (blockedTiles.has(key(point.x, current.y)) || blockedTiles.has(key(current.x, point.y)))) continue;
       const nextCost = entry.cost + (diagonal ? Math.SQRT2 : 1); if (!cost.has(nextKey) || nextCost < cost.get(nextKey)!) { cost.set(nextKey, nextCost); cameFrom.set(nextKey, currentKey); frontier.push({ tile: next, cost: nextCost, priority: nextCost + octile(next.x, next.y) }); }

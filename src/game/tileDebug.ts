@@ -32,6 +32,8 @@ function containsAxisAligned(feature: { x: number; y: number; width: number; hei
 
 export function tileDebugInfo(tile: Tile, chunk?: WorldChunk): TileDebugInfo {
   const contents = new Set<string>();
+  if (tile.port) contents.add('Port');
+  if (tile.waterRoute) contents.add('Water route');
   const settlements = chunk?.settlements ?? [];
   const containingSettlement = settlements
     .filter((settlement) => Math.hypot(tile.x - settlement.x, tile.y - settlement.y) <= settlement.radius)
@@ -49,5 +51,8 @@ export function tileDebugInfo(tile: Tile, chunk?: WorldChunk): TileDebugInfo {
     chunk.settlementLayouts.flatMap((layout) => layout.buildings).filter((building: Building) => containsRotated(building, tile.x, tile.y)).forEach((building) => contents.add(title(building.type)));
     chunk.settlementLayouts.flatMap((layout) => layout.edgeFeatures).filter((feature: SettlementEdgeFeature) => containsAxisAligned(feature, tile.x, tile.y)).forEach((feature) => contents.add(title(feature.type)));
   }
-  return { x: tile.x, y: tile.y, terrain: tile.terrain, biome: tile.biome, walkable: tile.walkable, contents: [...contents].sort((a, b) => a.localeCompare(b)), settlement: containingSettlement ? { id: containingSettlement.id, name: containingSettlement.name, type: containingSettlement.type } : null };
+  const composed = chunk?.tiles.find((chunkTile) => chunkTile.x === tile.x && chunkTile.y === tile.y);
+  if (composed?.port) contents.add('Port');
+  if (composed?.waterRoute) contents.add('Water route');
+  return { x: tile.x, y: tile.y, terrain: tile.terrain, biome: tile.biome, walkable: composed?.walkable ?? tile.walkable, contents: [...contents].sort((a, b) => a.localeCompare(b)), settlement: containingSettlement ? { id: containingSettlement.id, name: containingSettlement.name, type: containingSettlement.type } : null };
 }

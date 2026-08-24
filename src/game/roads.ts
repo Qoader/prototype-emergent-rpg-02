@@ -5,7 +5,7 @@ import { REGION_SIZE_TILES } from './regions';
 import { findStartingPosition, key, random, tileAtConfig, worldToRegion, type RegionCoordinate, type WorldConfig, type WorldCoordinate } from './world';
 import type { WorldPoint } from './settlements';
 
-export const ROAD_NETWORK_VERSION = 13;
+export const ROAD_NETWORK_VERSION = 14;
 export const ROAD_GRAPH_REGION_SIZE = 4;
 const COARSE_CELL_SIZE = 16;
 const REFINEMENT_CORRIDOR_RADIUS = 24;
@@ -17,7 +17,9 @@ const coarseTerrainMemo = new Map<string, { fields: ReturnType<typeof fieldsAt>;
 export type RoadImportance = 'trail' | 'road' | 'highway';
 export interface RoadNode { id: string; ownerId: string; x: number; y: number; kind: RoadEndpoint['kind'] | 'junction' | 'player-start'; importance: number; }
 export interface Bridge { id: string; roadId: string; tiles: WorldCoordinate[]; points: WorldPoint[]; width: number; }
-export interface RoadSegment { id: string; parentId: string; ownerRegion: RegionCoordinate; from: RoadNode; to: RoadNode; importance: RoadImportance; width: number; tiles: WorldCoordinate[]; points: WorldPoint[]; bridges: Bridge[]; }
+export interface Port { id: string; roadId: string; x: number; y: number; waterTiles: WorldCoordinate[]; }
+export interface WaterRoute { id: string; roadId: string; tiles: WorldCoordinate[]; points: WorldPoint[]; width: number; ports: Port[]; }
+export interface RoadSegment { id: string; parentId: string; ownerRegion: RegionCoordinate; from: RoadNode; to: RoadNode; importance: RoadImportance; width: number; tiles: WorldCoordinate[]; points: WorldPoint[]; bridges: Bridge[]; waterRoutes: WaterRoute[]; ports: Port[]; }
 export interface RoadNetwork { key: RegionCoordinate; nodes: RoadNode[]; segments: RoadSegment[]; }
 
 function regionKey(region: RegionCoordinate) { return `${region.rx},${region.ry}`; }
@@ -260,12 +262,37 @@ function starterTileRouteWithFallback(config: WorldConfig, from: RoadNode, to: R
 
 function importance(a: RoadNode, b: RoadNode): RoadImportance { const value = Math.max(a.importance, b.importance); return value > 0.78 ? 'highway' : value > 0.5 ? 'road' : 'trail'; }
 function widthFor(value: RoadImportance) { return value === 'highway' ? 4 : value === 'road' ? 2.5 : 1.4; }
-function bridgeGroups(config: WorldConfig, path: WorldCoordinate[], roadId: string, width: number): Bridge[] { const bridges: Bridge[] = []; let current: WorldCoordinate[] = []; const flush = () => { if (!current.length) return; bridges.push({ id: `${roadId}:bridge:${bridges.length}`, roadId, tiles: current, points: current.map((tile) => ({ x: tile.x + 0.5, y: tile.y + 0.5 })), width }); current = []; }; for (const tile of path) { const terrain = tileAtConfig(config, tile.x, tile.y).terrain; if (terrain === 'river' || terrain === 'shallow-water' || terrain === 'deep-water') current.push(tile); else flush(); } flush(); return bridges; }
+function waterRoadData(config: WorldConfig, path: WorldCoordinate[], roadId: string, width: number) {
+  const bridges: Bridge[] = []; const waterRoutes: WaterRoute[] = []; const ports: Port[] = []; let current: WorldCoordinate[] = []; let currentKind: 'river' | 'lake' | null = null;
+  const flush = () => {
+    if (!current.length || !currentKind) return;
+    if (currentKind === 'river' || current.length < 4) bridges.push({ id: `${roadId}:bridge:${bridges.length}`, roadId, tiles: current, points: current.map((tile) => ({ x: tile.x + 0.5, y: tile.y + 0.5 })), width });
+    else {
+      const id = `${roadId}:water:${waterRoutes.length}`; const routePorts: Port[] = []; const startIndex = path.indexOf(current[0]); const endIndex = path.indexOf(current.at(-1)!);
+      for (const [index, neighbour] of [[0, path[startIndex - 1]], [current.length - 1, path[endIndex + 1]]] as const) if (neighbour && tileAtConfig(config, neighbour.x, neighbour.y).hydrology.waterBody === 'none') {
+        const port: Port = { id: `${id}:port:${routePorts.length}`, roadId, x: neighbour.x, y: neighbour.y, waterTiles: [current[index]] }; routePorts.push(port); ports.push(port);
+      }
+      waterRoutes.push({ id, roadId, tiles: current, points: current.map((tile) => ({ x: tile.x + 0.5, y: tile.y + 0.5 })), width, ports: routePorts });
+    }
+    current = []; currentKind = null;
+  };
+  for (const tile of path) { const waterBody = tileAtConfig(config, tile.x, tile.y).hydrology.waterBody; const kind = waterBody === 'river' ? 'river' : waterBody === 'ocean' || waterBody === 'lake' ? 'lake' : null; if (kind !== currentKind) { flush(); currentKind = kind; } if (kind) current.push(tile); }
+  flush(); return { bridges, waterRoutes, ports };
+}
 function smooth(path: WorldCoordinate[]) { return path.map((point, index) => ({ x: point.x + 0.5 + (index > 0 && index < path.length - 1 ? 0.08 * Math.sin(index * 2.3) : 0), y: point.y + 0.5 + (index > 0 && index < path.length - 1 ? 0.08 * Math.cos(index * 1.7) : 0) })); }
 
 function splitSegment(parentId: string, from: RoadNode, to: RoadNode, path: WorldCoordinate[], config: WorldConfig): RoadSegment[] {
   const pieces: RoadSegment[] = []; let currentRegion: RegionCoordinate | null = null; let current: WorldCoordinate[] = [];
-  const flush = () => { if (!currentRegion || current.length < 2) return; const kind = importance(from, to); const id = `${parentId}:piece:${regionKey(currentRegion)}`; pieces.push({ id, parentId, ownerRegion: currentRegion, from, to, importance: kind, width: widthFor(kind), tiles: current, points: smooth(current), bridges: bridgeGroups(config, current, id, widthFor(kind)) }); };
+  const kind = importance(from, to); const width = widthFor(kind); const water = waterRoadData(config, path, parentId, width);
+  const flush = () => {
+    if (!currentRegion || current.length < 2) return;
+    const id = `${parentId}:piece:${regionKey(currentRegion)}`; const currentKeys = new Set(current.map((tile) => key(tile.x, tile.y)));
+    const slice = (tiles: WorldCoordinate[]) => tiles.filter((tile) => currentKeys.has(key(tile.x, tile.y)));
+    const bridges = water.bridges.map((bridge) => ({ ...bridge, id: `${bridge.id}:${regionKey(currentRegion!)}`, tiles: slice(bridge.tiles) })).filter((bridge) => bridge.tiles.length).map((bridge) => ({ ...bridge, points: bridge.tiles.map((tile) => ({ x: tile.x + 0.5, y: tile.y + 0.5 })) }));
+    const waterRoutes = water.waterRoutes.map((route) => ({ ...route, tiles: slice(route.tiles) })).filter((route) => route.tiles.length).map((route) => ({ ...route, points: route.tiles.map((tile) => ({ x: tile.x + 0.5, y: tile.y + 0.5 })), ports: route.ports.filter((port) => currentKeys.has(key(port.x, port.y))) }));
+    const ports = water.ports.filter((port) => currentKeys.has(key(port.x, port.y)));
+    pieces.push({ id, parentId, ownerRegion: currentRegion, from, to, importance: kind, width, tiles: current, points: smooth(current), bridges, waterRoutes, ports });
+  };
   for (const point of path) { const region = worldToRegion(point.x, point.y); if (!currentRegion || region.rx !== currentRegion.rx || region.ry !== currentRegion.ry) { flush(); currentRegion = region; current = current.length ? [current.at(-1)!, point] : [point]; } else current.push(point); }
   flush(); return pieces;
 }

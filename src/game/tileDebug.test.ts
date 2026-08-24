@@ -17,7 +17,7 @@ describe('tile debug info', () => {
       settlementLayouts: [{ settlementId: 'town', bounds: { minX: 0, minY: 0, maxX: 4, maxY: 4 }, streets: [], buildings: [{ id: 'building', type: 'market' as const, districtId: 'district', x: 1, y: 1, width: 2, height: 2, rotation: 0, roadId: null, courtyard: false }], districts: [], edgeFeatures: [] }],
       landmarks: [{ id: 'landmark', type: 'shrine' as const, x: 1, y: 1, importance: 1 }],
       resources: [{ id: 'resource', type: 'ore' as const, x: 1, y: 1, importance: 1 }],
-      roadEndpoints: [], roads: [{ id: 'road', parentId: 'road', ownerRegion: { rx: 0, ry: 0 }, from: { id: 'a', ownerId: 'a', x: 1, y: 1, kind: 'resource' as const, importance: 1 }, to: { id: 'b', ownerId: 'b', x: 2, y: 2, kind: 'resource' as const, importance: 1 }, importance: 'road' as const, width: 1, tiles: [{ x: 1, y: 1 }], points: [], bridges: [] }],
+      roadEndpoints: [], roads: [{ id: 'road', parentId: 'road', ownerRegion: { rx: 0, ry: 0 }, from: { id: 'a', ownerId: 'a', x: 1, y: 1, kind: 'resource' as const, importance: 1 }, to: { id: 'b', ownerId: 'b', x: 2, y: 2, kind: 'resource' as const, importance: 1 }, importance: 'road' as const, width: 1, tiles: [{ x: 1, y: 1 }], points: [], bridges: [], waterRoutes: [], ports: [] }],
     };
     expect(tileDebugInfo(tile, chunk).contents).toEqual(['Market', 'Market anchor', 'Ore resource', 'Road', 'Shrine', 'Town center']);
     expect(tileDebugInfo(tile, chunk).settlement).toEqual({ id: 'town', name: 'Ashford', type: 'town' });

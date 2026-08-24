@@ -128,7 +128,7 @@ describe('organic road planning', () => {
       id: 'starter', parentId: 'starter', ownerRegion: { rx: 0, ry: 0 },
       from: { id: 'start', ownerId: 'start', x: 0, y: 0, kind: 'player-start' as const, importance: 1 },
       to: { id: 'gate', ownerId: 'gate', x: 1536, y: 0, kind: 'settlement-gate' as const, importance: 1 },
-      importance: 'road' as const, width: 2, tiles: [{ x: 0, y: 0 }, { x: 1536, y: 0 }], points: [], bridges: [],
+      importance: 'road' as const, width: 2, tiles: [{ x: 0, y: 0 }, { x: 1536, y: 0 }], points: [], bridges: [], waterRoutes: [], ports: [],
     };
     expect(starterClaimsForCell([segment], 0, 0)).toEqual(new Set(['0,0']));
     expect(starterClaimsForCell([segment], 1, 0)).toEqual(new Set(['96,0']));

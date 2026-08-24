@@ -14,6 +14,25 @@ export function drawRoad(features: Container, points: WorldPoint[], width: numbe
   features.addChild(road);
 }
 
+/** A pale channel keeps boat routes legible against animated water. */
+export function drawWaterRoute(features: Container, points: WorldPoint[], width: number) {
+  if (!points.length) return;
+  const route = new Graphics().moveTo(points[0].x * TILE_SIZE, points[0].y * TILE_SIZE);
+  for (const point of points.slice(1)) route.lineTo(point.x * TILE_SIZE, point.y * TILE_SIZE);
+  route.stroke({ color: 0x163f55, width: Math.max(5, roadStrokeWidthPx(width) * 0.72), alpha: 0.7 });
+  route.stroke({ color: 0xd8e8cd, width: Math.max(2, roadStrokeWidthPx(width) * 0.18), alpha: 0.9 });
+  route.zIndex = points.at(-1)!.y * TILE_SIZE - 1;
+  features.addChild(route);
+}
+
+export function drawPort(features: Container, x: number, y: number, waterTiles: Array<{ x: number; y: number }>) {
+  const centerX = x * TILE_SIZE + TILE_SIZE / 2; const centerY = y * TILE_SIZE + TILE_SIZE / 2; const g = new Graphics();
+  g.roundRect(-14, -8, 28, 16, 3).fill(0x70472c).rect(-13, -5, 26, 3).fill({ color: 0xd0a66b, alpha: 0.72 });
+  for (const water of waterTiles) { const dx = water.x - x; const dy = water.y - y; g.moveTo(dx * 13, dy * 13).lineTo(dx * 21, dy * 21).stroke({ color: 0x8a5b35, width: 7 }); }
+  g.circle(0, -11, 4).fill(0xf0cf75).moveTo(0, -8).lineTo(0, 2).stroke({ color: 0x4a3426, width: 2 });
+  g.position.set(centerX, centerY); g.zIndex = centerY + 14; features.addChild(g);
+}
+
 export function drawTree(features: Container, x: number, y: number, size = 1) {
   const g = new Graphics();
   const radius = TILE_SIZE * (0.22 + size * 0.08);
