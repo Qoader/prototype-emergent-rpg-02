@@ -8,7 +8,7 @@ import { streamingPlan, type ChunkBounds, type StreamRequest } from './streaming
 import { ChunkStreamingScheduler } from './ChunkStreamingScheduler';
 import { visibleWorldBounds } from './worldViewport';
 import { composeRoads, type RoadCandidate } from './roadCompositor';
-import { drawBuilding, drawCitySquare, drawEdgeFeature, drawFortification, drawLandmark, drawPort, drawRoad, drawTree, drawWaterRoute } from './featureRenderer';
+import { drawBuilding, drawPlaza, drawEdgeFeature, drawFortification, drawLandmark, drawPort, drawRoad, drawTree, drawWaterRoute } from './featureRenderer';
 
 type Status = (value: string) => void;
 type TileDebug = (value: TileDebugInfo) => void;
@@ -109,7 +109,7 @@ export class Game {
       for (const port of road.ports) { const portKey = key(port.x, port.y); drawnPorts.set(portKey, [...(drawnPorts.get(portKey) ?? []), ...port.waterTiles]); }
     }
     for (const [portKey, waterTiles] of drawnPorts) { const [x, y] = portKey.split(',').map(Number); drawPort(objectLayer, x, y, waterTiles); }
-    if (detail === 'full') for (const layout of chunk.settlementLayouts) for (const square of layout.citySquares ?? []) drawCitySquare(citySurfaceLayer, square, bounds);
+    if (detail === 'full') for (const layout of chunk.settlementLayouts) for (const square of layout.plazas) drawPlaza(citySurfaceLayer, square, bounds);
     if (detail === 'medium') { for (const settlement of chunk.settlements) { const g = new Graphics().moveTo(settlement.x * TILE_SIZE, settlement.y * TILE_SIZE - 10).lineTo(settlement.x * TILE_SIZE + 8, settlement.y * TILE_SIZE + 4).lineTo(settlement.x * TILE_SIZE - 8, settlement.y * TILE_SIZE + 4).fill({ color: 0xe8c67b, alpha: 0.72 }); g.zIndex = settlement.y * TILE_SIZE; objectLayer.addChild(g); } for (const layout of chunk.settlementLayouts) if (layout.fortification) drawFortification(objectLayer, layout.fortification, { minX: chunk.cx * CHUNK_SIZE, minY: chunk.cy * CHUNK_SIZE, maxX: chunk.cx * CHUNK_SIZE + CHUNK_SIZE - 1, maxY: chunk.cy * CHUNK_SIZE + CHUNK_SIZE - 1 }); }
     if (detail !== 'full') return;
     const intramural = new Set(chunk.settlementLayouts.flatMap((layout) => layout.fortification?.intramuralTiles ?? []).map((tile) => key(tile.x, tile.y)));

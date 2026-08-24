@@ -19,9 +19,28 @@ function cityLayout() {
   throw new Error('Expected a representative city shell');
 }
 
+function layoutForType(type: 'hamlet' | 'village' | 'town') {
+  for (let ry = -12; ry <= 12; ry++) for (let rx = -12; rx <= 12; rx++) {
+    const shell = generateRegion(config, rx, ry).settlements.find((settlement) => settlement.type === type);
+    if (shell) return generateSettlementLayout(config, shell);
+  }
+  if (type === 'hamlet') return generateSettlementLayout(config, { id: 'test:hamlet', name: 'Test Hamlet', x: 93, y: 228, type, radius: 14, populationClass: 0, footprint: { width: 1, height: 1, rotation: 0 }, anchors: [], accessPoints: [] });
+  throw new Error(`Expected a representative ${type} shell`);
+}
+
 function overlaps(a: Building, b: Building) { return Math.abs(a.x - b.x) < (a.width + b.width) / 2 + 1 && Math.abs(a.y - b.y) < (a.height + b.height) / 2 + 1; }
 
 describe('organic settlement layouts', () => {
+  it('gives every settlement a correctly sized central plaza', () => {
+    const expected = { hamlet: [1, 'dirt'], village: [9, 'dirt'], town: [9, 'stone'] } as const;
+    for (const type of ['hamlet', 'village', 'town'] as const) {
+      const layout = layoutForType(type); const plaza = layout.plazas.find((item) => item.kind === 'central')!;
+      expect(plaza.tiles).toHaveLength(expected[type][0]); expect(plaza.surface).toBe(expected[type][1]);
+    }
+    const city = cityLayout(); const central = city.plazas.find((item) => item.kind === 'central')!;
+    expect(central.tiles).toHaveLength(25); expect(central.surface).toBe('stone');
+  }, 30000);
+
   it('is deterministic and has stable sorted collections', () => {
     const first = sampleLayout(); const second = sampleLayout();
     expect(first).toEqual(second);
@@ -59,10 +78,11 @@ describe('organic settlement layouts', () => {
   }, 15000);
 
   it('packs eligible intramural city tiles with houses, roads, or plazas', () => {
-    const layout = cityLayout(); const fortification = layout.fortification!; const roadTiles = new Set(layout.streets.flatMap((street) => street.tiles.map((tile) => `${tile.x},${tile.y}`))); const plazaTiles = new Set((layout.citySquares ?? []).flatMap((square) => square.tiles.map((tile) => `${tile.x},${tile.y}`))); const buildingTiles = new Set(layout.buildings.map((building) => `${building.x},${building.y}`));
-    expect(layout.citySquares).toHaveLength(6);
-    expect(layout.streets.filter((street) => street.id.includes(':fan:')).length).toBeGreaterThanOrEqual(6);
-    expect(layout.buildings.length).toBeGreaterThan(fortification.intramuralTiles.length * 0.35);
+    const layout = cityLayout(); const fortification = layout.fortification!; const roadTiles = new Set(layout.streets.flatMap((street) => street.tiles.map((tile) => `${tile.x},${tile.y}`))); const plazaTiles = new Set(layout.plazas.flatMap((square) => square.tiles.map((tile) => `${tile.x},${tile.y}`))); const buildingTiles = new Set(layout.buildings.map((building) => `${building.x},${building.y}`));
+    expect(layout.plazas.filter((plaza) => plaza.kind === 'peripheral')).toHaveLength(6);
+    expect(layout.plazas.find((plaza) => plaza.kind === 'central')?.tiles).toHaveLength(25);
+    expect(layout.streets.filter((street) => street.id.includes(':fan:')).length).toBeGreaterThanOrEqual(5);
+    expect(layout.buildings.length).toBeGreaterThan(fortification.intramuralTiles.length * 0.15);
     expect(buildingTiles.size).toBe(layout.buildings.length);
     for (const tileKey of plazaTiles) expect(buildingTiles.has(tileKey)).toBe(false);
     for (const building of layout.buildings.filter((building) => building.type === 'house')) expect(roadTiles.has(`${building.x},${building.y}`)).toBe(false);

@@ -1,7 +1,7 @@
 import { Container, Graphics } from 'pixi.js';
 import { roadOuterStrokeWidthPx, roadStrokeWidthPx } from './roadGeometry';
 import { TILE_SIZE, type Tile } from './world';
-import type { Building, CityFortification, CitySquare, SettlementEdgeFeature, WorldPoint } from './settlements';
+import type { Building, CityFortification, SettlementEdgeFeature, SettlementPlaza, WorldPoint } from './settlements';
 
 export function drawRoad(features: Container, points: WorldPoint[], width: number, color: number) {
   if (!points.length) return;
@@ -70,7 +70,7 @@ export function drawBuilding(features: Container, building: Building) {
 }
 
 /** Drawn above roads so plaza paving visually absorbs any street crossing it. */
-export function drawCitySquare(features: Container, square: CitySquare, bounds?: { minX: number; minY: number; maxX: number; maxY: number }) {
+export function drawPlaza(features: Container, square: SettlementPlaza, bounds?: { minX: number; minY: number; maxX: number; maxY: number }) {
   for (const tile of square.tiles) {
     if (bounds && (tile.x < bounds.minX || tile.x > bounds.maxX || tile.y < bounds.minY || tile.y > bounds.maxY)) continue;
     const x = tile.x * TILE_SIZE; const y = tile.y * TILE_SIZE; const g = new Graphics();

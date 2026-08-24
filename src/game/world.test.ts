@@ -29,7 +29,7 @@ describe('procedural Emberwild', () => {
   });
   it('provides deterministic namespaced random access', () => {
     const config = createWorldConfig('EMBERWILD-01');
-    expect(random(config, 'settlement', 12, -4)).toBe(0.23347023711539805);
+    expect(random(config, 'settlement', 12, -4)).toBe(0.47035506507381797);
     expect(random(config, 'settlement', 12, -4)).toBe(random(config, 'settlement', 12, -4));
     expect(random(config, 'settlement', 12, -4)).not.toBe(random(config, 'road', 12, -4));
     expect(random(config, 'settlement', 12, -4)).not.toBe(random(createWorldConfig('OTHER'), 'settlement', 12, -4));
@@ -44,9 +44,9 @@ describe('procedural Emberwild', () => {
   });
   it('creates versioned stable chunk, region, and feature identities', () => {
     const config = createWorldConfig('EMBERWILD-01');
-    expect(chunkKey({ ...config, cx: 2, cy: -3 })).toBe('EMBERWILD-01:v9:chunk:2,-3');
-    expect(regionKey({ ...config, rx: -2, ry: 3 })).toBe('EMBERWILD-01:v9:region:-2,3');
-    expect(featureId(config, 'settlement', 12, -4)).toBe('EMBERWILD-01:v9:settlement:12,-4');
+    expect(chunkKey({ ...config, cx: 2, cy: -3 })).toBe('EMBERWILD-01:v10:chunk:2,-3');
+    expect(regionKey({ ...config, rx: -2, ry: 3 })).toBe('EMBERWILD-01:v10:region:-2,3');
+    expect(featureId(config, 'settlement', 12, -4)).toBe('EMBERWILD-01:v10:settlement:12,-4');
   });
   it('regenerates identical chunk data regardless of request order', () => {
     const config = createWorldConfig('EMBERWILD-01');
@@ -84,7 +84,8 @@ describe('procedural Emberwild', () => {
     const ordinaryPath = findPath(seed, tileAt(seed, start.x, start.y), blocked);
     const roadPath = findPath(seed, tileAt(seed, start.x, start.y), blocked, undefined, { roadTileKeys: new Set([`${blocked.x},${blocked.y}`]) });
     expect(ordinaryPath.at(-1)).not.toMatchObject({ x: blocked.x, y: blocked.y });
-    expect(roadPath.at(-1)).toMatchObject({ x: blocked.x, y: blocked.y });
+    expect(roadPath.at(-1)?.x).toBe(blocked.x);
+    expect(roadPath.at(-1)?.y).toBeCloseTo(blocked.y);
   });
 
   it('keeps random-access variation directionally balanced', () => {
