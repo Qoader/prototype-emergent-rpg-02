@@ -7,12 +7,12 @@ import { streamingPlan, type ChunkBounds, type StreamRequest } from './streaming
 import { ChunkStreamingScheduler } from './ChunkStreamingScheduler';
 import { visibleWorldBounds } from './worldViewport';
 import { composeRoads, type RoadCandidate } from './roadCompositor';
-import { drawBuilding, drawEdgeFeature, drawFortification, drawLandmark, drawRoad, drawTree } from './featureRenderer';
+import { drawBuilding, drawCitySquare, drawEdgeFeature, drawFortification, drawLandmark, drawRoad, drawTree } from './featureRenderer';
 
 type Status = (value: string) => void;
 type TileDebug = (value: TileDebugInfo) => void;
 type Detail = 'terrain' | 'medium' | 'full';
-interface ChunkDisplay { chunk: WorldChunk; container: Container; terrain: Sprite; texture: RenderTexture; roadLayer: Container; objectLayer: Container; detail: Detail | null; }
+interface ChunkDisplay { chunk: WorldChunk; container: Container; terrain: Sprite; texture: RenderTexture; roadLayer: Container; citySurfaceLayer: Container; objectLayer: Container; detail: Detail | null; }
 
 const TERRAIN_COLORS = { 'deep-water': 0x183d5a, 'shallow-water': 0x2c7182, shore: 0xbc9d63, plain: 0x557a4d, hill: 0x71804d, mountain: 0x606975, river: 0x2b8491, 'starter-ground': 0x8a7757 } as const;
 const BIOME_COLORS = { ocean: 0x245d72, lake: 0x367d8c, coast: 0xcfb270, grassland: 0x66854e, forest: 0x315b43, swamp: 0x506e50, desert: 0xb28d57, tundra: 0x92a0a1, alpine: 0xaab3b7 } as const;
@@ -75,9 +75,9 @@ export class Game {
     }
     this.app.renderer.render({ container: graphics, target: texture, clear: true }); graphics.destroy(); return texture;
   }
-  private drawChunk(chunk: WorldChunk, detail: Detail) { const chunkKey = key(chunk.cx, chunk.cy); const existing = this.displays.get(chunkKey); if (existing) { existing.chunk = chunk; this.updateDetail(existing, detail); this.lastTileDebugSignature = ''; return; } const texture = this.drawTerrain(chunk); const container = new Container(); const terrain = new Sprite(texture); terrain.position.set(chunk.cx * CHUNK_SIZE * TILE_SIZE, chunk.cy * CHUNK_SIZE * TILE_SIZE); const roadLayer = new Container(); const objectLayer = new Container(); objectLayer.sortableChildren = true; container.addChild(terrain, roadLayer, objectLayer); this.world.addChild(container); const display: ChunkDisplay = { chunk, container, terrain, texture, roadLayer, objectLayer, detail: null }; this.displays.set(chunkKey, display); this.updateDetail(display, detail); this.lastTileDebugSignature = ''; if (!this.initialTerrainMarked) { this.initialTerrainMarked = true; performance.mark('emberwild-first-terrain-ready'); } }
+  private drawChunk(chunk: WorldChunk, detail: Detail) { const chunkKey = key(chunk.cx, chunk.cy); const existing = this.displays.get(chunkKey); if (existing) { existing.chunk = chunk; this.updateDetail(existing, detail); this.lastTileDebugSignature = ''; return; } const texture = this.drawTerrain(chunk); const container = new Container(); const terrain = new Sprite(texture); terrain.position.set(chunk.cx * CHUNK_SIZE * TILE_SIZE, chunk.cy * CHUNK_SIZE * TILE_SIZE); const roadLayer = new Container(); const citySurfaceLayer = new Container(); const objectLayer = new Container(); objectLayer.sortableChildren = true; container.addChild(terrain, roadLayer, citySurfaceLayer, objectLayer); this.world.addChild(container); const display: ChunkDisplay = { chunk, container, terrain, texture, roadLayer, citySurfaceLayer, objectLayer, detail: null }; this.displays.set(chunkKey, display); this.updateDetail(display, detail); this.lastTileDebugSignature = ''; if (!this.initialTerrainMarked) { this.initialTerrainMarked = true; performance.mark('emberwild-first-terrain-ready'); } }
   private updateDetail(display: ChunkDisplay, detail: Detail) {
-    if (display.detail === detail) return; display.detail = detail; display.roadLayer.removeChildren().forEach((child) => child.destroy()); display.objectLayer.removeChildren().forEach((child) => child.destroy()); if (detail === 'terrain') return; const { chunk, roadLayer, objectLayer } = display;
+    if (display.detail === detail) return; display.detail = detail; display.roadLayer.removeChildren().forEach((child) => child.destroy()); display.citySurfaceLayer.removeChildren().forEach((child) => child.destroy()); display.objectLayer.removeChildren().forEach((child) => child.destroy()); if (detail === 'terrain') return; const { chunk, roadLayer, citySurfaceLayer, objectLayer } = display; const bounds = { minX: chunk.cx * CHUNK_SIZE, minY: chunk.cy * CHUNK_SIZE, maxX: chunk.cx * CHUNK_SIZE + CHUNK_SIZE - 1, maxY: chunk.cy * CHUNK_SIZE + CHUNK_SIZE - 1 };
     const candidates: RoadCandidate[] = [];
     for (const road of chunk.roads) if (detail === 'full' || road.importance !== 'trail') {
       const color = road.importance === 'highway' ? 0xd8b46e : road.importance === 'road' ? 0xba9563 : 0x8d7657;
@@ -92,14 +92,15 @@ export class Game {
     }
     const composition = composeRoads(candidates);
     for (const road of [...composition.roads].reverse()) drawRoad(roadLayer, road.points, road.width, road.color);
+    if (detail === 'full') for (const layout of chunk.settlementLayouts) for (const square of layout.citySquares ?? []) drawCitySquare(citySurfaceLayer, square, bounds);
     if (detail === 'medium') { for (const settlement of chunk.settlements) { const g = new Graphics().moveTo(settlement.x * TILE_SIZE, settlement.y * TILE_SIZE - 10).lineTo(settlement.x * TILE_SIZE + 8, settlement.y * TILE_SIZE + 4).lineTo(settlement.x * TILE_SIZE - 8, settlement.y * TILE_SIZE + 4).fill({ color: 0xe8c67b, alpha: 0.72 }); g.zIndex = settlement.y * TILE_SIZE; objectLayer.addChild(g); } for (const layout of chunk.settlementLayouts) if (layout.fortification) drawFortification(objectLayer, layout.fortification, { minX: chunk.cx * CHUNK_SIZE, minY: chunk.cy * CHUNK_SIZE, maxX: chunk.cx * CHUNK_SIZE + CHUNK_SIZE - 1, maxY: chunk.cy * CHUNK_SIZE + CHUNK_SIZE - 1 }); }
     if (detail !== 'full') return;
     const intramural = new Set(chunk.settlementLayouts.flatMap((layout) => layout.fortification?.intramuralTiles ?? []).map((tile) => key(tile.x, tile.y)));
     for (const tile of chunk.tiles) { const density = this.variation('props', tile.x, tile.y); if (tile.road || intramural.has(key(tile.x, tile.y))) continue; if (tile.landmark && tile.walkable) drawLandmark(objectLayer, tile); else if (tile.walkable && tile.biome === 'forest' && density > 0.89) drawTree(objectLayer, tile.x, tile.y, density); else if (tile.walkable && (tile.biome === 'grassland' || tile.biome === 'swamp') && density > 0.9775) drawTree(objectLayer, tile.x, tile.y, 0.7); }
-    for (const layout of chunk.settlementLayouts) { if (layout.fortification) drawFortification(objectLayer, layout.fortification, { minX: chunk.cx * CHUNK_SIZE, minY: chunk.cy * CHUNK_SIZE, maxX: chunk.cx * CHUNK_SIZE + CHUNK_SIZE - 1, maxY: chunk.cy * CHUNK_SIZE + CHUNK_SIZE - 1 }); for (const building of layout.buildings) drawBuilding(objectLayer, building); for (const edge of layout.edgeFeatures) drawEdgeFeature(objectLayer, edge); }
+    for (const layout of chunk.settlementLayouts) { if (layout.fortification) drawFortification(objectLayer, layout.fortification, bounds); for (const building of layout.buildings) if (building.x >= bounds.minX && building.x <= bounds.maxX && building.y >= bounds.minY && building.y <= bounds.maxY) drawBuilding(objectLayer, building); for (const edge of layout.edgeFeatures) if (edge.x <= bounds.maxX && edge.x + edge.width - 1 >= bounds.minX && edge.y <= bounds.maxY && edge.y + edge.height - 1 >= bounds.minY) drawEdgeFeature(objectLayer, edge); }
     objectLayer.sortChildren();
   }
-  private evict(chunkKey: string, display: ChunkDisplay) { this.world.removeChild(display.container); display.roadLayer.destroy({ children: true }); display.objectLayer.destroy({ children: true }); display.container.destroy({ children: true }); display.texture.destroy(true); this.displays.delete(chunkKey); }
+  private evict(chunkKey: string, display: ChunkDisplay) { this.world.removeChild(display.container); display.roadLayer.destroy({ children: true }); display.citySurfaceLayer.destroy({ children: true }); display.objectLayer.destroy({ children: true }); display.container.destroy({ children: true }); display.texture.destroy(true); this.displays.delete(chunkKey); }
   private resize = () => { this.app.stage.hitArea = this.app.screen; this.streamDirty = true; this.render(); };
   destroy() { this.destroyed = true; this.scheduler.stop(); window.removeEventListener('resize', this.resize); for (const [chunkKey, display] of this.displays) this.evict(chunkKey, display); this.prefetched.clear(); void this.provider.dispose(); this.app.destroy(true, { children: true }); }
 }

@@ -12,7 +12,8 @@ export interface Building { id: string; type: BuildingType; districtId: string; 
 export interface SettlementEdgeFeature { id: string; type: 'garden' | 'field' | 'farm' | 'cottage' | 'barn' | 'yard' | 'pen' | 'trail'; x: number; y: number; width: number; height: number; rotation: number; }
 export interface CityGate { id: string; accessPointId: string; x: number; y: number; }
 export interface CityFortification { intramuralTiles: WorldCoordinate[]; wallTiles: WorldCoordinate[]; wallPoints: WorldPoint[]; gates: CityGate[]; engineeredTiles: WorldCoordinate[]; }
-export interface SettlementLayout { settlementId: string; bounds: RegionBounds; streets: SettlementStreet[]; buildings: Building[]; districts: District[]; edgeFeatures: SettlementEdgeFeature[]; fortification?: CityFortification; }
+export interface CitySquare { id: string; tiles: WorldCoordinate[]; surface: 'dirt' | 'stone'; }
+export interface SettlementLayout { settlementId: string; bounds: RegionBounds; streets: SettlementStreet[]; buildings: Building[]; districts: District[]; edgeFeatures: SettlementEdgeFeature[]; citySquares?: CitySquare[]; fortification?: CityFortification; }
 
 interface SearchNode { x: number; y: number; score: number; }
 class SearchHeap {
@@ -37,6 +38,44 @@ function boundsFor(shell: SettlementShell): RegionBounds { const fringe = shell.
 export function settlementLayoutBounds(shell: SettlementShell) { return boundsFor(shell); }
 function inBounds(point: WorldCoordinate, bounds: RegionBounds) { return point.x >= bounds.minX && point.x <= bounds.maxX && point.y >= bounds.minY && point.y <= bounds.maxY; }
 function stablePoints(points: WorldCoordinate[]) { return points.filter((point, index) => index === 0 || point.x !== points[index - 1].x || point.y !== points[index - 1].y); }
+
+/** A deterministic, city-only router that never leaves eligible intramural land. */
+function routeInsideCity(start: WorldCoordinate, target: WorldCoordinate, eligible: Set<string>, existing: Set<string>) {
+  const startKey = key(start.x, start.y); const targetKey = key(target.x, target.y);
+  if (!eligible.has(startKey) || !eligible.has(targetKey)) return [];
+  const frontier = new SearchHeap(); const costs = new Map<string, number>([[startKey, 0]]); const cameFrom = new Map<string, string | null>([[startKey, null]]); frontier.push({ ...start, score: 0 });
+  while (frontier.length) {
+    const current = frontier.pop()!; const currentKey = key(current.x, current.y);
+    if (currentKey === targetKey) break;
+    for (const [dx, dy] of DIRECTIONS) {
+      const next = { x: current.x + dx, y: current.y + dy }; const nextKey = key(next.x, next.y); if (!eligible.has(nextKey)) continue;
+      const nextCost = (costs.get(currentKey) ?? Infinity) + (existing.has(nextKey) ? 0.2 : 1);
+      if (nextCost < (costs.get(nextKey) ?? Infinity)) { costs.set(nextKey, nextCost); cameFrom.set(nextKey, currentKey); frontier.push({ ...next, score: nextCost + Math.abs(next.x - target.x) + Math.abs(next.y - target.y) }); }
+    }
+  }
+  if (!cameFrom.has(targetKey)) return [];
+  const path: WorldCoordinate[] = []; let cursor: string | null = targetKey;
+  while (cursor) { const [x, y] = cursor.split(',').map(Number); path.unshift({ x, y }); cursor = cameFrom.get(cursor) ?? null; }
+  return path;
+}
+
+function citySquaresFor(config: WorldConfig, shell: SettlementShell, eligible: Set<string>, wallKeys: Set<string>, gateKeys: Set<string>): CitySquare[] {
+  const result: CitySquare[] = []; const occupied = new Set<string>();
+  for (let sector = 0; sector < 6; sector++) {
+    const angle = Math.PI * 2 * sector / 6 + random(config, 'settlement:city-square-angle', shell.id, sector) * 0.5;
+    const candidates: WorldCoordinate[] = [];
+    for (const tileKey of eligible) { const [x, y] = tileKey.split(',').map(Number); const dx = x - shell.x; const dy = y - shell.y; const difference = Math.abs(Math.atan2(Math.sin(Math.atan2(dy, dx) - angle), Math.cos(Math.atan2(dy, dx) - angle))); if (difference < Math.PI / 5 && distance({ x, y }, shell) > shell.radius * 0.12) candidates.push({ x, y }); }
+    candidates.sort((a, b) => Math.abs(distance(a, shell) - shell.radius * 0.32) - Math.abs(distance(b, shell) - shell.radius * 0.32) || key(a.x, a.y).localeCompare(key(b.x, b.y)));
+    const center = candidates.find((candidate) => {
+      for (let y = candidate.y - 1; y <= candidate.y + 1; y++) for (let x = candidate.x - 1; x <= candidate.x + 1; x++) { const tileKey = key(x, y); if (!eligible.has(tileKey) || wallKeys.has(tileKey) || gateKeys.has(tileKey) || occupied.has(tileKey)) return false; }
+      return true;
+    });
+    if (!center) continue;
+    const tiles: WorldCoordinate[] = []; for (let y = center.y - 1; y <= center.y + 1; y++) for (let x = center.x - 1; x <= center.x + 1; x++) { tiles.push({ x, y }); occupied.add(key(x, y)); }
+    result.push({ id: `${shell.id}:square:${result.length}`, tiles, surface: random(config, 'settlement:city-square-surface', shell.id, sector) > 0.5 ? 'stone' : 'dirt' });
+  }
+  return result;
+}
 
 function route(config: WorldConfig, shell: SettlementShell, start: WorldCoordinate, target: WorldCoordinate, existing: Set<string>, fieldCache: Map<string, GeographicFields>, landCache: Map<string, boolean>, avoidWater: boolean) {
   const bounds = boundsFor(shell); const frontier = new SearchHeap(); frontier.push({ ...start, score: 0 }); const cost = new Map<string, number>([[key(start.x, start.y), 0]]); const cameFrom = new Map<string, string | null>([[key(start.x, start.y), null]]);
@@ -115,16 +154,48 @@ export function generateSettlementLayout(config: WorldConfig, shell: SettlementS
   const center = { x: shell.x, y: shell.y };
   for (const connection of connections) { const target = connection.target!; const path = routeWithoutWater(config, shell, center, target, streetTiles, fieldCache, landCache); if (path.length < 2) continue; path.forEach((point) => streetTiles.add(key(point.x, point.y))); streets.push({ id: connection.id, type: 'main', tiles: path, points: smoothPath(path), width: shell.type === 'city' ? 3 : 2 }); }
   const fortification = fortificationFor(config, shell, streets, fieldCache, landCache); const intramuralKeys = new Set(fortification?.intramuralTiles.map((tile) => key(tile.x, tile.y)) ?? []); const wallKeys = new Set(fortification?.wallTiles.map((tile) => key(tile.x, tile.y)) ?? []); const gateKeys = new Set(fortification?.gates.map((gate) => key(gate.x, gate.y)) ?? []);
-  const budget = shell.type === 'city' ? 44 : shell.type === 'town' ? 16 : shell.type === 'village' ? 8 : 3; const mainTiles = [...streetTiles].map((value) => { const [x, y] = value.split(',').map(Number); return { x, y }; });
-  for (let index = 0; index < budget; index++) { if (!mainTiles.length) break; const base = mainTiles[Math.floor(random(config, 'settlement:branch-base', shell.id, index) * mainTiles.length)]; const angle = random(config, 'settlement:branch-angle', shell.id, index) * Math.PI * 2; const length = 4 + Math.floor(random(config, 'settlement:branch-length', shell.id, index) * Math.max(4, shell.radius * 0.5)); const target = { x: Math.round(base.x + Math.cos(angle) * length), y: Math.round(base.y + Math.sin(angle) * length) }; if (!inBounds(target, bounds)) continue; const path = routeWithoutWater(config, shell, base, target, streetTiles, fieldCache, landCache); if (path.length < 3 || path.some((point) => wallKeys.has(key(point.x, point.y)) && !gateKeys.has(key(point.x, point.y)))) continue; path.forEach((point) => streetTiles.add(key(point.x, point.y))); streets.push({ id: `${shell.id}:secondary:${index}`, type: index % 3 === 0 ? 'lane' : 'secondary', tiles: path, points: smoothPath(path), width: 1 }); }
+  const cityEligible = new Set([...intramuralKeys].filter((tileKey) => { const [x, y] = tileKey.split(',').map(Number); return buildableLand(config, x, y); }));
+  const isDenseCity = config.version >= 9 && shell.type === 'city' && Boolean(fortification);
+  if (isDenseCity) {
+    const addCityStreet = (id: string, type: SettlementStreet['type'], base: WorldCoordinate, target: WorldCoordinate) => {
+      const path = routeInsideCity(base, target, cityEligible, streetTiles); if (path.length < 2 || path.every((tile) => streetTiles.has(key(tile.x, tile.y)))) return;
+      path.forEach((tile) => streetTiles.add(key(tile.x, tile.y))); streets.push({ id, type, tiles: path, points: smoothPath(path), width: type === 'main' ? 3 : 1 });
+    };
+    const connected = () => [...streetTiles].map((tileKey) => { const [x, y] = tileKey.split(',').map(Number); return { x, y }; }).filter((tile) => cityEligible.has(key(tile.x, tile.y)));
+    // Fan streets ensure every viable cardinal and corner sector is reached.
+    for (let sector = 0; sector < 8; sector++) {
+      const angle = Math.PI * 2 * sector / 8; const targets = [...cityEligible].map((tileKey) => { const [x, y] = tileKey.split(',').map(Number); return { x, y }; }).filter((tile) => Math.abs(Math.atan2(Math.sin(Math.atan2(tile.y - shell.y, tile.x - shell.x) - angle), Math.cos(Math.atan2(tile.y - shell.y, tile.x - shell.x) - angle))) < Math.PI / 8).sort((a, b) => distance(b, shell) - distance(a, shell) || key(a.x, a.y).localeCompare(key(b.x, b.y)));
+      const bases = connected().sort((a, b) => distance(a, targets[0] ?? shell) - distance(b, targets[0] ?? shell) || key(a.x, a.y).localeCompare(key(b.x, b.y)));
+      if (targets[0] && bases[0]) addCityStreet(`${shell.id}:fan:${sector}`, 'secondary', bases[0], targets[0]);
+    }
+    // Dense local lanes and cross-links, each deterministically connected to the growing network.
+    for (let index = 0; index < 72; index++) {
+      const allEligible = [...cityEligible].map((tileKey) => { const [x, y] = tileKey.split(',').map(Number); return { x, y }; }); const target = allEligible[Math.floor(random(config, 'settlement:city-lane-target', shell.id, index) * allEligible.length)]; const bases = connected().sort((a, b) => distance(a, target) - distance(b, target) || key(a.x, a.y).localeCompare(key(b.x, b.y)));
+      if (target && bases[0]) addCityStreet(`${shell.id}:lane:${index}`, index % 4 === 0 ? 'secondary' : 'lane', bases[0], target);
+    }
+  } else {
+    const budget = shell.type === 'city' ? 44 : shell.type === 'town' ? 16 : shell.type === 'village' ? 8 : 3; const mainTiles = [...streetTiles].map((value) => { const [x, y] = value.split(',').map(Number); return { x, y }; });
+    for (let index = 0; index < budget; index++) { if (!mainTiles.length) break; const base = mainTiles[Math.floor(random(config, 'settlement:branch-base', shell.id, index) * mainTiles.length)]; const angle = random(config, 'settlement:branch-angle', shell.id, index) * Math.PI * 2; const length = 4 + Math.floor(random(config, 'settlement:branch-length', shell.id, index) * Math.max(4, shell.radius * 0.5)); const target = { x: Math.round(base.x + Math.cos(angle) * length), y: Math.round(base.y + Math.sin(angle) * length) }; if (!inBounds(target, bounds)) continue; const path = routeWithoutWater(config, shell, base, target, streetTiles, fieldCache, landCache); if (path.length < 3 || path.some((point) => wallKeys.has(key(point.x, point.y)) && !gateKeys.has(key(point.x, point.y)))) continue; path.forEach((point) => streetTiles.add(key(point.x, point.y))); streets.push({ id: `${shell.id}:secondary:${index}`, type: index % 3 === 0 ? 'lane' : 'secondary', tiles: path, points: smoothPath(path), width: 1 }); }
+  }
+  const citySquares = isDenseCity ? citySquaresFor(config, shell, cityEligible, wallKeys, gateKeys) : [];
+  const squareKeys = new Set(citySquares.flatMap((square) => square.tiles.map((tile) => key(tile.x, tile.y))));
   const buildings: Building[] = []; const occupiedStreet = new Set(streetTiles); const buildingBudget = shell.type === 'city' ? 130 : shell.type === 'town' ? 42 : shell.type === 'village' ? 24 : 10;
   const required: Array<{ type: BuildingType; x: number; y: number; district: District }> = [{ type: shell.type === 'hamlet' || shell.type === 'village' ? 'house' : 'keep', x: shell.x, y: shell.y, district: districts[0] }]; const market = shell.anchors.find((anchor) => anchor.type === 'market'); if (market) required.push({ type: 'market', x: market.x, y: market.y, district: districts.find((district) => district.type === 'market') ?? districts[0] });
-  for (const [index, item] of required.entries()) if (buildableLand(config, item.x, item.y)) buildings.push({ id: `${shell.id}:building:anchor:${index}`, type: item.type, districtId: item.district.id, x: item.x, y: item.y, width: 1, height: 1, rotation: 0, roadId: null, courtyard: false });
-  const streetList = streets.flatMap((street) => street.tiles.map((tile, pointIndex) => ({ street, tile, pointIndex }))).sort((a, b) => `${a.street.id}:${a.pointIndex}`.localeCompare(`${b.street.id}:${b.pointIndex}`));
-  for (let index = 0; index < streetList.length && buildings.length < buildingBudget; index++) { const sample = streetList[index]; const sampleInside = intramuralKeys.has(key(sample.tile.x, sample.tile.y)); if (sample.pointIndex % (sampleInside ? 1 : 3)) continue; const next = sample.street.tiles[Math.min(sample.pointIndex + 1, sample.street.tiles.length - 1)]; const dx = next.x - sample.tile.x; const dy = next.y - sample.tile.y; const length = Math.hypot(dx, dy) || 1; const side = random(config, 'settlement:building-side', shell.id, index) > 0.5 ? 1 : -1; const setback = sampleInside ? 1 + Math.floor(random(config, 'settlement:building-setback', shell.id, index) * 2) : 2 + Math.floor(random(config, 'settlement:building-setback', shell.id, index) * 3); const candidate = { x: Math.round(sample.tile.x - dy / length * side * setback), y: Math.round(sample.tile.y + dx / length * side * setback) }; const candidateInside = intramuralKeys.has(key(candidate.x, candidate.y)); const district = nearestDistrict(districts, candidate); const effectiveDistrict = candidateInside && (district.type === 'agricultural' || district.type === 'rural-edge') ? districts.find((item) => item.type === 'residential') ?? district : district; const building: Building = { id: `${shell.id}:building:${index}`, type: buildingType(effectiveDistrict.type, index), districtId: effectiveDistrict.id, x: candidate.x, y: candidate.y, width: 1, height: 1, rotation: 0, roadId: sample.street.id, courtyard: random(config, 'settlement:courtyard', shell.id, index) > 0.65 }; if (!buildableLand(config, candidate.x, candidate.y) || occupiedStreet.has(key(candidate.x, candidate.y)) || wallKeys.has(key(candidate.x, candidate.y)) || distance(candidate, center) > shell.radius + 16 || buildings.some((other) => overlaps(building, other))) continue; buildings.push(building); }
+  if (isDenseCity) {
+    const reserved = new Set([...occupiedStreet, ...squareKeys, ...wallKeys, ...gateKeys]);
+    for (const [index, item] of required.entries()) {
+      const candidates = [...cityEligible].map((tileKey) => { const [x, y] = tileKey.split(',').map(Number); return { x, y }; }).filter((tile) => !reserved.has(key(tile.x, tile.y))).sort((a, b) => distance(a, item) - distance(b, item) || key(a.x, a.y).localeCompare(key(b.x, b.y)));
+      const candidate = candidates[0]; if (!candidate) continue; reserved.add(key(candidate.x, candidate.y)); buildings.push({ id: `${shell.id}:building:anchor:${index}`, type: item.type, districtId: item.district.id, x: candidate.x, y: candidate.y, width: 1, height: 1, rotation: 0, roadId: null, courtyard: false });
+    }
+    for (const tileKey of [...cityEligible].sort()) if (!reserved.has(tileKey)) { const [x, y] = tileKey.split(',').map(Number); const district = nearestDistrict(districts, { x, y }); buildings.push({ id: `${shell.id}:building:house:${tileKey}`, type: 'house', districtId: district.id, x, y, width: 1, height: 1, rotation: 0, roadId: null, courtyard: false }); }
+  } else {
+    for (const [index, item] of required.entries()) if (buildableLand(config, item.x, item.y)) buildings.push({ id: `${shell.id}:building:anchor:${index}`, type: item.type, districtId: item.district.id, x: item.x, y: item.y, width: 1, height: 1, rotation: 0, roadId: null, courtyard: false });
+    const streetList = streets.flatMap((street) => street.tiles.map((tile, pointIndex) => ({ street, tile, pointIndex }))).sort((a, b) => `${a.street.id}:${a.pointIndex}`.localeCompare(`${b.street.id}:${b.pointIndex}`));
+    for (let index = 0; index < streetList.length && buildings.length < buildingBudget; index++) { const sample = streetList[index]; const sampleInside = intramuralKeys.has(key(sample.tile.x, sample.tile.y)); if (sample.pointIndex % (sampleInside ? 1 : 3)) continue; const next = sample.street.tiles[Math.min(sample.pointIndex + 1, sample.street.tiles.length - 1)]; const dx = next.x - sample.tile.x; const dy = next.y - sample.tile.y; const length = Math.hypot(dx, dy) || 1; const side = random(config, 'settlement:building-side', shell.id, index) > 0.5 ? 1 : -1; const setback = sampleInside ? 1 + Math.floor(random(config, 'settlement:building-setback', shell.id, index) * 2) : 2 + Math.floor(random(config, 'settlement:building-setback', shell.id, index) * 3); const candidate = { x: Math.round(sample.tile.x - dy / length * side * setback), y: Math.round(sample.tile.y + dx / length * side * setback) }; const candidateInside = intramuralKeys.has(key(candidate.x, candidate.y)); const district = nearestDistrict(districts, candidate); const effectiveDistrict = candidateInside && (district.type === 'agricultural' || district.type === 'rural-edge') ? districts.find((item) => item.type === 'residential') ?? district : district; const building: Building = { id: `${shell.id}:building:${index}`, type: buildingType(effectiveDistrict.type, index), districtId: effectiveDistrict.id, x: candidate.x, y: candidate.y, width: 1, height: 1, rotation: 0, roadId: sample.street.id, courtyard: random(config, 'settlement:courtyard', shell.id, index) > 0.65 }; if (!buildableLand(config, candidate.x, candidate.y) || occupiedStreet.has(key(candidate.x, candidate.y)) || wallKeys.has(key(candidate.x, candidate.y)) || distance(candidate, center) > shell.radius + 16 || buildings.some((other) => overlaps(building, other))) continue; buildings.push(building); }
+  }
   const edgeFeatures: SettlementEdgeFeature[] = []; const edgeBudget = shell.type === 'city' ? 20 : shell.type === 'town' ? 14 : shell.type === 'village' ? 9 : 5;
-  for (let index = 0; index < edgeBudget; index++) { const angle = random(config, 'settlement:edge-angle', shell.id, index) * Math.PI * 2; const radius = shell.radius + 5 + random(config, 'settlement:edge-radius', shell.id, index) * 14; const x = Math.round(shell.x + Math.cos(angle) * radius); const y = Math.round(shell.y + Math.sin(angle) * radius); if (!buildableLand(config, x, y)) continue; const type: SettlementEdgeFeature['type'] = index % 4 === 0 ? 'farm' : index % 3 === 0 ? 'barn' : index % 2 ? 'garden' : 'cottage'; edgeFeatures.push({ id: `${shell.id}:edge:${index}`, type, x, y, width: type === 'farm' ? 8 : 3, height: type === 'farm' ? 5 : 3, rotation: random(config, 'settlement:edge-rotation', shell.id, index) * Math.PI }); }
-  return { settlementId: shell.id, bounds, streets: streets.sort((a, b) => a.id.localeCompare(b.id)), buildings: buildings.sort((a, b) => a.id.localeCompare(b.id)), districts: districts.sort((a, b) => a.id.localeCompare(b.id)), edgeFeatures: edgeFeatures.sort((a, b) => a.id.localeCompare(b.id)), fortification };
+  for (let index = 0; index < edgeBudget; index++) { const angle = random(config, 'settlement:edge-angle', shell.id, index) * Math.PI * 2; const radius = shell.radius + 5 + random(config, 'settlement:edge-radius', shell.id, index) * 14; const x = Math.round(shell.x + Math.cos(angle) * radius); const y = Math.round(shell.y + Math.sin(angle) * radius); if (!buildableLand(config, x, y) || (isDenseCity && intramuralKeys.has(key(x, y)))) continue; const type: SettlementEdgeFeature['type'] = index % 4 === 0 ? 'farm' : index % 3 === 0 ? 'barn' : index % 2 ? 'garden' : 'cottage'; edgeFeatures.push({ id: `${shell.id}:edge:${index}`, type, x, y, width: type === 'farm' ? 8 : 3, height: type === 'farm' ? 5 : 3, rotation: random(config, 'settlement:edge-rotation', shell.id, index) * Math.PI }); }
+  return { settlementId: shell.id, bounds, streets: streets.sort((a, b) => a.id.localeCompare(b.id)), buildings: buildings.sort((a, b) => a.id.localeCompare(b.id)), districts: districts.sort((a, b) => a.id.localeCompare(b.id)), edgeFeatures: edgeFeatures.sort((a, b) => a.id.localeCompare(b.id)), citySquares, fortification };
 }
 
 export function layoutIntersectsBounds(layout: Pick<SettlementLayout, 'bounds'>, bounds: RegionBounds) { return layout.bounds.maxX >= bounds.minX && layout.bounds.minX <= bounds.maxX && layout.bounds.maxY >= bounds.minY && layout.bounds.minY <= bounds.maxY; }

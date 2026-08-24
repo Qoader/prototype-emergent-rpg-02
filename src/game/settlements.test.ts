@@ -11,6 +11,14 @@ function sampleLayout() {
   return generateSettlementLayout(config, region.settlements[0]);
 }
 
+function cityLayout() {
+  for (let ry = -2; ry <= 2; ry++) for (let rx = -2; rx <= 2; rx++) {
+    const shell = generateRegion(config, rx, ry).settlements.find((settlement) => settlement.type === 'city');
+    if (shell) return generateSettlementLayout(config, shell);
+  }
+  throw new Error('Expected a representative city shell');
+}
+
 function overlaps(a: Building, b: Building) { return Math.abs(a.x - b.x) < (a.width + b.width) / 2 + 1 && Math.abs(a.y - b.y) < (a.height + b.height) / 2 + 1; }
 
 describe('organic settlement layouts', () => {
@@ -49,4 +57,14 @@ describe('organic settlement layouts', () => {
       expect(edge.y).toBeGreaterThanOrEqual(layout.bounds.minY - 16); expect(edge.y).toBeLessThanOrEqual(layout.bounds.maxY + 16);
     }
   }, 15000);
+
+  it('packs eligible intramural city tiles with houses, roads, or plazas', () => {
+    const layout = cityLayout(); const fortification = layout.fortification!; const roadTiles = new Set(layout.streets.flatMap((street) => street.tiles.map((tile) => `${tile.x},${tile.y}`))); const plazaTiles = new Set((layout.citySquares ?? []).flatMap((square) => square.tiles.map((tile) => `${tile.x},${tile.y}`))); const buildingTiles = new Set(layout.buildings.map((building) => `${building.x},${building.y}`));
+    expect(layout.citySquares).toHaveLength(6);
+    expect(layout.streets.filter((street) => street.id.includes(':fan:')).length).toBeGreaterThanOrEqual(6);
+    expect(layout.buildings.length).toBeGreaterThan(fortification.intramuralTiles.length * 0.35);
+    expect(buildingTiles.size).toBe(layout.buildings.length);
+    for (const tileKey of plazaTiles) expect(buildingTiles.has(tileKey)).toBe(false);
+    for (const building of layout.buildings.filter((building) => building.type === 'house')) expect(roadTiles.has(`${building.x},${building.y}`)).toBe(false);
+  }, 30000);
 });

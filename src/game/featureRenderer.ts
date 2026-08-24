@@ -1,7 +1,7 @@
 import { Container, Graphics } from 'pixi.js';
 import { roadOuterStrokeWidthPx, roadStrokeWidthPx } from './roadGeometry';
 import { TILE_SIZE, type Tile } from './world';
-import type { Building, CityFortification, SettlementEdgeFeature, WorldPoint } from './settlements';
+import type { Building, CityFortification, CitySquare, SettlementEdgeFeature, WorldPoint } from './settlements';
 
 export function drawRoad(features: Container, points: WorldPoint[], width: number, color: number) {
   if (!points.length) return;
@@ -48,6 +48,23 @@ export function drawBuilding(features: Container, building: Building) {
   g.position.set(building.x * TILE_SIZE + TILE_SIZE / 2, building.y * TILE_SIZE + TILE_SIZE / 2);
   g.zIndex = g.y + height / 2;
   features.addChild(g);
+}
+
+/** Drawn above roads so plaza paving visually absorbs any street crossing it. */
+export function drawCitySquare(features: Container, square: CitySquare, bounds?: { minX: number; minY: number; maxX: number; maxY: number }) {
+  for (const tile of square.tiles) {
+    if (bounds && (tile.x < bounds.minX || tile.x > bounds.maxX || tile.y < bounds.minY || tile.y > bounds.maxY)) continue;
+    const x = tile.x * TILE_SIZE; const y = tile.y * TILE_SIZE; const g = new Graphics();
+    if (square.surface === 'stone') {
+      g.rect(x + 1, y + 1, TILE_SIZE - 2, TILE_SIZE - 2).fill(0x9b9685);
+      g.moveTo(x + 2, y + TILE_SIZE / 2).lineTo(x + TILE_SIZE - 2, y + TILE_SIZE / 2).stroke({ color: 0x716e65, width: 1, alpha: 0.65 });
+      g.moveTo(x + TILE_SIZE / 2, y + 2).lineTo(x + TILE_SIZE / 2, y + TILE_SIZE - 2).stroke({ color: 0x716e65, width: 1, alpha: 0.55 });
+    } else {
+      g.rect(x + 1, y + 1, TILE_SIZE - 2, TILE_SIZE - 2).fill(0x9d8158);
+      g.moveTo(x + 6, y + 12).lineTo(x + TILE_SIZE - 7, y + 10).stroke({ color: 0x765c3e, width: 1, alpha: 0.28 });
+    }
+    features.addChild(g);
+  }
 }
 
 export function drawEdgeFeature(features: Container, edge: SettlementEdgeFeature) {
