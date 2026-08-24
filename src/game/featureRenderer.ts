@@ -1,7 +1,7 @@
 import { Container, Graphics } from 'pixi.js';
 import { roadOuterStrokeWidthPx, roadStrokeWidthPx } from './roadGeometry';
 import { TILE_SIZE, type Tile } from './world';
-import type { Building, SettlementEdgeFeature, WorldPoint } from './settlements';
+import type { Building, CityFortification, SettlementEdgeFeature, WorldPoint } from './settlements';
 
 export function drawRoad(features: Container, points: WorldPoint[], width: number, color: number) {
   if (!points.length) return;
@@ -54,4 +54,18 @@ export function drawEdgeFeature(features: Container, edge: SettlementEdgeFeature
   const g = new Graphics().rect(edge.x * TILE_SIZE + 2, edge.y * TILE_SIZE + 2, edge.width * TILE_SIZE - 4, edge.height * TILE_SIZE - 4).fill({ color: edge.type === 'farm' || edge.type === 'field' ? 0xb0a65b : 0x6c744b, alpha: 0.38 });
   g.zIndex = (edge.y + edge.height) * TILE_SIZE - 5;
   features.addChild(g);
+}
+
+export function drawFortification(features: Container, fortification: CityFortification, bounds?: { minX: number; minY: number; maxX: number; maxY: number }) {
+  const gates = new Set(fortification.gates.map((gate) => `${gate.x},${gate.y}`));
+  for (const tile of fortification.wallTiles) {
+    if (bounds && (tile.x < bounds.minX || tile.x > bounds.maxX || tile.y < bounds.minY || tile.y > bounds.maxY)) continue;
+    const engineered = fortification.engineeredTiles.some((other) => other.x === tile.x && other.y === tile.y);
+    const g = new Graphics().rect(tile.x * TILE_SIZE + 2, tile.y * TILE_SIZE + 5, TILE_SIZE - 4, TILE_SIZE - 8).fill(engineered ? 0x8a9ba0 : 0x6e716b).rect(tile.x * TILE_SIZE + 4, tile.y * TILE_SIZE + 7, TILE_SIZE - 8, 5).fill(0xa7a58c);
+    g.zIndex = tile.y * TILE_SIZE + TILE_SIZE; features.addChild(g);
+  }
+  for (const gate of fortification.gates) {
+    if (bounds && (gate.x < bounds.minX || gate.x > bounds.maxX || gate.y < bounds.minY || gate.y > bounds.maxY)) continue;
+    if (gates.has(`${gate.x},${gate.y}`)) { const g = new Graphics().rect(gate.x * TILE_SIZE + 10, gate.y * TILE_SIZE + 14, TILE_SIZE - 20, TILE_SIZE - 10).fill(0x4b372d); g.zIndex = gate.y * TILE_SIZE + TILE_SIZE + 1; features.addChild(g); }
+  }
 }

@@ -3,8 +3,8 @@
 export const TILE_SIZE = 40;
 export const CHUNK_SIZE = 24;
 export const REGION_CHUNK_SIZE = 16;
-export const GENERATOR_VERSION = 7;
-export const SUPPORTED_GENERATOR_VERSIONS = [6, GENERATOR_VERSION] as const;
+export const GENERATOR_VERSION = 8;
+export const SUPPORTED_GENERATOR_VERSIONS = [6, 7, GENERATOR_VERSION] as const;
 export const TREE_LANDMARK_THRESHOLD = 0.84;
 export const STARTER_RADIUS = 2;
 const START_SEARCH_RADIUS = 96;
@@ -161,12 +161,13 @@ class PathHeap {
   get size() { return this.values.length; }
   private compare(a: PathEntry, b: PathEntry) { return a.priority - b.priority || a.cost - b.cost || key(a.tile.x, a.tile.y).localeCompare(key(b.tile.x, b.tile.y)); }
 }
-export interface PathOptions { maxExpandedNodes?: number; maxPathLength?: number; roadTileKeys?: ReadonlySet<string>; }
+export interface PathOptions { maxExpandedNodes?: number; maxPathLength?: number; roadTileKeys?: ReadonlySet<string>; blockedTileKeys?: ReadonlySet<string>; }
 export function findPath(seed: string, start: Tile, target: Tile, roadNetwork?: RoadNetwork, options: PathOptions = {}): Tile[] {
   const roadTiles = new Set(options.roadTileKeys ?? []);
+  const blockedTiles = options.blockedTileKeys ?? new Set<string>();
   for (const segment of roadNetwork?.segments ?? []) for (const tile of segment.tiles) roadTiles.add(key(tile.x, tile.y));
   for (const segment of roadNetwork?.segments ?? []) for (const bridge of segment.bridges) for (const tile of bridge.tiles) roadTiles.add(key(tile.x, tile.y));
-  const traversable = (tile: Tile, tileKey = key(tile.x, tile.y)) => tile.walkable || roadTiles.has(tileKey);
+  const traversable = (tile: Tile, tileKey = key(tile.x, tile.y)) => !blockedTiles.has(tileKey) && (tile.walkable || roadTiles.has(tileKey));
   const tileCache = new Map<string, Tile>(); const getTile = (x: number, y: number) => { const tileKey = key(x, y); const cached = tileCache.get(tileKey); if (cached) return cached; const tile = tileAt(seed, x, y); tileCache.set(tileKey, tile); return tile; };
   const startChunk = worldToChunk(start.x, start.y); const minX = (startChunk.cx - 1) * CHUNK_SIZE; const minY = (startChunk.cy - 1) * CHUNK_SIZE; const maxX = (startChunk.cx + 2) * CHUNK_SIZE - 1; const maxY = (startChunk.cy + 2) * CHUNK_SIZE - 1;
   const boundedTarget = { x: Math.max(minX, Math.min(maxX, target.x)), y: Math.max(minY, Math.min(maxY, target.y)) };
@@ -188,7 +189,9 @@ export function findPath(seed: string, start: Tile, target: Tile, roadNetwork?: 
     for (const point of neighbors(current)) {
       if (point.x < minX || point.x > maxX || point.y < minY || point.y > maxY) continue;
       const next = getTile(point.x, point.y); const nextKey = key(next.x, next.y); if (!traversable(next, nextKey) || (nextKey === targetKey && targetBlocked)) continue;
-      const diagonal = point.x !== current.x && point.y !== current.y; const nextCost = entry.cost + (diagonal ? Math.SQRT2 : 1); if (!cost.has(nextKey) || nextCost < cost.get(nextKey)!) { cost.set(nextKey, nextCost); cameFrom.set(nextKey, currentKey); frontier.push({ tile: next, cost: nextCost, priority: nextCost + octile(next.x, next.y) }); }
+      const diagonal = point.x !== current.x && point.y !== current.y;
+      if (diagonal && (blockedTiles.has(key(point.x, current.y)) || blockedTiles.has(key(current.x, point.y)))) continue;
+      const nextCost = entry.cost + (diagonal ? Math.SQRT2 : 1); if (!cost.has(nextKey) || nextCost < cost.get(nextKey)!) { cost.set(nextKey, nextCost); cameFrom.set(nextKey, currentKey); frontier.push({ tile: next, cost: nextCost, priority: nextCost + octile(next.x, next.y) }); }
     }
   }
   let destinationKey = searchTargetKey;
