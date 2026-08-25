@@ -66,6 +66,19 @@ describe('region-level feature planning', () => {
     expect(provider.stats().regions.size).toBeLessThanOrEqual(16);
   }, 30000);
 
+  it('hydrates a cached terrain chunk into the deterministic full chunk', async () => {
+    const provider = new WorldProvider(config, { regionCapacity: 16, chunkCapacity: 4 });
+    const terrain = await provider.getTerrainChunk(0, 0);
+    const full = await provider.getChunk(0, 0);
+
+    expect(terrain.detail).toBe('terrain');
+    expect(full.detail).toBe('full');
+    expect(full.tiles.map((tile) => ({ x: tile.x, y: tile.y, terrain: tile.terrain, biome: tile.biome }))).toEqual(
+      terrain.tiles.map((tile) => ({ x: tile.x, y: tile.y, terrain: tile.terrain, biome: tile.biome })),
+    );
+    expect(provider.stats().terrainChunks.hits).toBeGreaterThan(0);
+  }, 30000);
+
   it('clearing caches does not change deterministic content', async () => {
     const provider = new WorldProvider(config, { regionCapacity: 2, chunkCapacity: 2 });
     const before = await provider.getChunk(-2, -2);

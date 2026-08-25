@@ -6,15 +6,19 @@ test.describe('Emberwild', () => {
 
     await expect(page).toHaveTitle('Emberwild');
     await expect(page.getByText('EMBERWILD', { exact: true })).toBeVisible();
-    await expect(
-      page.getByText('Exploring the Emberwild', { exact: true }),
-    ).toBeVisible();
+    await expect(page.getByText('Preparing the Emberwild…', { exact: true })).toBeVisible();
     await expect(
       page.getByText('WORLD SEED EMBERWILD-01', { exact: true }),
     ).toBeVisible();
     await expect(page.locator('.canvas-host canvas')).toBeVisible();
     await expect(page.locator('.tile-debug')).toContainText('CURRENT TILE');
     await expect(page.locator('.tile-debug')).toContainText('starter-ground');
+    await expect.poll(() => page.evaluate(() => performance.getEntriesByName('emberwild-player-terrain-ready').length)).toBe(1);
+    const startupMarks = await page.evaluate(() => ['emberwild-worker-ready', 'emberwild-player-terrain-ready'].map((name) => performance.getEntriesByName(name)[0]?.startTime ?? -1));
+    expect(startupMarks[0]).toBeGreaterThanOrEqual(0);
+    expect(startupMarks[1]).toBeGreaterThan(startupMarks[0]);
+    const firstTerrainMs = await page.evaluate(() => performance.getEntriesByName('emberwild-player-terrain')[0]?.duration ?? Infinity);
+    expect(firstTerrainMs).toBeLessThan(1_000);
   });
 
   test('opens settings and toggles tile debug visibility', async ({ page }) => {

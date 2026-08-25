@@ -26,7 +26,8 @@ export interface ChunkCoordinate { cx: number; cy: number; }
 export interface RegionCoordinate { rx: number; ry: number; }
 export interface ChunkKey extends ChunkCoordinate { seed: string; version: number; }
 export interface RegionKey extends RegionCoordinate { seed: string; version: number; }
-export interface WorldChunk extends ChunkCoordinate { tiles: Tile[]; settlements: SettlementShell[]; settlementLayouts: SettlementLayout[]; landmarks: LandmarkAnchor[]; resources: ResourceAnchor[]; roadEndpoints: RoadEndpoint[]; roads: RoadSegment[]; }
+export interface TerrainChunk extends ChunkCoordinate { detail: 'terrain'; tiles: Tile[]; }
+export interface WorldChunk extends Omit<TerrainChunk, 'detail'> { detail: 'full'; settlements: SettlementShell[]; settlementLayouts: SettlementLayout[]; landmarks: LandmarkAnchor[]; resources: ResourceAnchor[]; roadEndpoints: RoadEndpoint[]; roads: RoadSegment[]; }
 
 export function createWorldConfig(seed: string, version = GENERATOR_VERSION): WorldConfig { return { seed, version }; }
 
@@ -141,13 +142,13 @@ export function classifyBiome(fields: ReturnType<typeof fieldsAt>, terrain: Terr
   return 'grassland';
 }
 
-export function chunkAt(config: WorldConfig, cx: number, cy: number): WorldChunk {
+export function chunkAt(config: WorldConfig, cx: number, cy: number): TerrainChunk {
   assertInteger(cx, 'cx'); assertInteger(cy, 'cy');
   const tiles: Tile[] = [];
   for (let y = 0; y < CHUNK_SIZE; y++) for (let x = 0; x < CHUNK_SIZE; x++) {
     const worldX = cx * CHUNK_SIZE + x; const worldY = cy * CHUNK_SIZE + y; const fields = fieldsAt(config, worldX, worldY); const hydrology = hydrologyAt(config, worldX, worldY); tiles.push(tileFromFields(config, worldX, worldY, fields, hydrology));
   }
-  return { cx, cy, tiles, settlements: [], settlementLayouts: [], landmarks: [], resources: [], roadEndpoints: [], roads: [] };
+  return { cx, cy, detail: 'terrain', tiles };
 }
 export function key(x: number, y: number) { return `${x},${y}`; }
 export function neighbors(tile: Tile) {

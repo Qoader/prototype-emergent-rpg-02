@@ -32,7 +32,7 @@
   <div class="canvas-host" bind:this={host}></div>
   <section class="hud" aria-label="Adventure status">
     <div class="brand"><span class="brand-mark">✦</span><span>EMBERWILD</span></div>
-    <div class="status"><span class:walking={movement === 'Walking'} class="status-dot"></span>{movement}</div>
+    <div class="status" role="status" aria-live="polite"><span class:walking={movement === 'Walking'} class="status-dot"></span>{movement}</div>
     <div class="seed">WORLD SEED <strong>{seed}</strong></div>
     <button class="settings-button" type="button" aria-haspopup="dialog" aria-expanded={settingsOpen} on:click={openSettings}>Settings</button>
   </section>
