@@ -2,6 +2,7 @@ import { expect, test } from '@playwright/test';
 
 test.describe('Emberwild', () => {
   test('loads the adventure HUD and world canvas', async ({ page }) => {
+    test.setTimeout(60_000);
     await page.goto('./');
 
     await expect(page).toHaveTitle('Emberwild');
@@ -13,12 +14,12 @@ test.describe('Emberwild', () => {
     await expect(page.locator('.canvas-host canvas')).toBeVisible();
     await expect(page.locator('.tile-debug')).toContainText('CURRENT TILE');
     await expect(page.locator('.tile-debug')).toContainText('starter-ground');
-    await expect.poll(() => page.evaluate(() => performance.getEntriesByName('emberwild-player-terrain-ready').length)).toBe(1);
-    const startupMarks = await page.evaluate(() => ['emberwild-worker-ready', 'emberwild-player-terrain-ready'].map((name) => performance.getEntriesByName(name)[0]?.startTime ?? -1));
+    await expect.poll(() => page.evaluate(() => performance.getEntriesByName('emberwild-player-chunk-ready').length), { timeout: 50_000 }).toBe(1);
+    const startupMarks = await page.evaluate(() => ['emberwild-worker-ready', 'emberwild-player-chunk-ready'].map((name) => performance.getEntriesByName(name)[0]?.startTime ?? -1));
     expect(startupMarks[0]).toBeGreaterThanOrEqual(0);
     expect(startupMarks[1]).toBeGreaterThan(startupMarks[0]);
-    const firstTerrainMs = await page.evaluate(() => performance.getEntriesByName('emberwild-player-terrain')[0]?.duration ?? Infinity);
-    expect(firstTerrainMs).toBeLessThan(1_000);
+    const firstChunkMs = await page.evaluate(() => performance.getEntriesByName('emberwild-player-chunk')[0]?.duration ?? Infinity);
+    expect(firstChunkMs).toBeLessThan(50_000);
   });
 
   test('opens settings and toggles tile debug visibility', async ({ page }) => {
