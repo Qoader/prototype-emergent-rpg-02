@@ -2,7 +2,7 @@ import { chunkAt, CHUNK_SIZE, REGION_CHUNK_SIZE, regionKey, findStartingPosition
 import { featureIntersectsBounds, generateRegion, type LandmarkAnchor, type NearbySettlementResult, type RegionData, type ResourceAnchor, type RoadEndpoint, type SettlementShell } from './regions';
 import { generateSettlementLayout, layoutIntersectsBounds, settlementLayoutBounds, type SettlementLayout } from './settlements';
 import { generateRoadCell, generateStarterRoad, roadSegmentIntersectsBounds, ROAD_NETWORK_VERSION, roadGraphCell, starterClaimsForCell, travelRoadLinks, type RoadNetwork, type RoadSegment } from './roads';
-import type { TravelTopology } from './adventurers';
+import type { SettlementArrivalPoint, TravelTopology } from './adventurers';
 import { LruCache } from './LruCache';
 
 export interface WorldProviderOptions { chunkCapacity?: number; regionCapacity?: number; roadCapacity?: number; layoutCapacity?: number; }
@@ -56,8 +56,11 @@ export class WorldProvider {
     const segments = (await Promise.all(cells.map((cell) => this.getRoadCell(cell.gx, cell.gy)))).flat();
     const regions = (await Promise.all(cells.flatMap((cell) => { const result: Array<{ rx: number; ry: number }> = []; for (let y = cell.gy * 4; y < cell.gy * 4 + 4; y++) for (let x = cell.gx * 4; x < cell.gx * 4 + 4; x++) result.push({ rx: x, ry: y }); return result; }))).flat();
     const uniqueRegions = [...new Map(regions.map((region) => [`${region.rx},${region.ry}`, region])).values()];
-    const settlementData = (await Promise.all(uniqueRegions.map((region) => this.getRegion(region.rx, region.ry)))).flatMap((region) => region.settlements);
-    return { settlements: uniqueById(settlementData), roadLinks: travelRoadLinks([...new Map(segments.map((segment) => [segment.id, segment])).values()]) };
+    const settlementData = uniqueById((await Promise.all(uniqueRegions.map((region) => this.getRegion(region.rx, region.ry)))).flatMap((region) => region.settlements));
+    const cityLayouts = await Promise.all(settlementData.filter((settlement) => settlement.type === 'city').map((settlement) => this.getSettlementLayout(settlement)));
+    const arrivalPoints: SettlementArrivalPoint[] = settlementData.map((settlement) => ({ id: `${settlement.id}:plaza:central`, settlementId: settlement.id, kind: 'central' as const, x: settlement.x, y: settlement.y }));
+    for (const layout of cityLayouts) for (const plaza of layout.plazas.filter((plaza) => plaza.kind === 'peripheral')) { const tile = plaza.tiles[Math.floor(plaza.tiles.length / 2)]; if (tile) arrivalPoints.push({ id: plaza.id, settlementId: layout.settlementId, kind: 'peripheral', x: tile.x, y: tile.y }); }
+    return { settlements: settlementData, roadLinks: travelRoadLinks([...new Map(segments.map((segment) => [segment.id, segment])).values()]), arrivalPoints };
   }
 
   getRegion(rx: number, ry: number): Promise<RegionData> {
