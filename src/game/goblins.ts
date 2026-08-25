@@ -10,7 +10,7 @@ const SETTLEMENT_FRINGE = { hamlet: 15, village: 28, town: 28, city: 34 } as con
 
 export type GoblinState = 'wandering' | 'pursuing-player' | 'returning-to-wilderness' | 'approaching-adventurer' | 'fighting';
 export interface Goblin { id: string; x: number; y: number; previousX: number; previousY: number; state: GoblinState; path: Array<{ x: number; y: number }>; pathIndex: number; targetAdventurerId: string | null; speed: number; nextWanderAt: number; lod: 'live' | 'coarse' | 'sparse' | 'sleeping'; tickPhase: number; lastSimTime: number; }
-export interface GoblinContext { seed: string; settlements: SettlementShell[]; player: { x: number; y: number }; gameTime: number; }
+export interface GoblinContext { seed: string; settlements: SettlementShell[]; player: { x: number; y: number }; adventurers?: Array<{ id: string; x: number; y: number; state: string }>; gameTime: number; }
 
 function hash(value: string) { let result = 2166136261; for (const character of value) { result ^= character.charCodeAt(0); result = Math.imul(result, 16777619); } return (result >>> 0) / 4294967296; }
 function distance(a: { x: number; y: number }, b: { x: number; y: number }) { return Math.hypot(a.x - b.x, a.y - b.y); }
@@ -61,11 +61,14 @@ function advanceAlongPath(goblin: Goblin, seconds: number) {
 export function advanceGoblin(goblin: Goblin, context: GoblinContext, seconds: number) {
   if (goblin.state === 'fighting') { goblin.lastSimTime = context.gameTime; return; }
   goblin.previousX = goblin.x; goblin.previousY = goblin.y;
-  const playerDistance = distance(goblin, context.player);
-  if (goblin.state === 'wandering' && playerDistance <= NOTICE_RADIUS) goblin.state = 'pursuing-player';
-  if (goblin.state === 'pursuing-player' && playerDistance > LEASH_RADIUS) { goblin.state = 'returning-to-wilderness'; goblin.path = []; }
+  const playerDistance = distance(goblin, context.player); const opponent = (context.adventurers ?? []).map((candidate) => ({ ...candidate, distance: distance(goblin, candidate) })).filter((candidate) => candidate.distance <= NOTICE_RADIUS).sort((a, b) => a.distance - b.distance || a.id.localeCompare(b.id))[0];
+  if (goblin.state === 'wandering' && (playerDistance <= NOTICE_RADIUS || opponent)) { if (opponent && opponent.distance < playerDistance) { goblin.state = 'approaching-adventurer'; goblin.targetAdventurerId = opponent.id; } else goblin.state = 'pursuing-player'; }
+  const target = goblin.targetAdventurerId ? (context.adventurers ?? []).find((candidate) => candidate.id === goblin.targetAdventurerId) : undefined;
+  if ((goblin.state === 'pursuing-player' && playerDistance > LEASH_RADIUS) || (goblin.state === 'approaching-adventurer' && (!target || distance(goblin, target) > LEASH_RADIUS))) { goblin.state = 'returning-to-wilderness'; goblin.targetAdventurerId = null; goblin.path = []; }
   if (goblin.state === 'pursuing-player') {
     if (context.gameTime >= goblin.nextWanderAt && (!goblin.path.length || goblin.pathIndex >= goblin.path.length)) { goblin.path = pathTo(context.seed, goblin, context.player, context.settlements, false); goblin.pathIndex = 0; goblin.nextWanderAt = context.gameTime + 0.5; }
+  } else if (goblin.state === 'approaching-adventurer' && target) {
+    if (context.gameTime >= goblin.nextWanderAt && (!goblin.path.length || goblin.pathIndex >= goblin.path.length)) { goblin.path = pathTo(context.seed, goblin, target, context.settlements, false); goblin.pathIndex = 0; goblin.nextWanderAt = context.gameTime + 0.5; }
   } else if (goblin.state === 'returning-to-wilderness') {
     if (!inSettlementExclusion(goblin.x, goblin.y, context.settlements)) goblin.state = 'wandering';
     else if (!goblin.path.length) { const target = neighbors(Math.round(goblin.x), Math.round(goblin.y)).find((point) => legalWildernessTile(tileAt(context.seed, point.x, point.y), context.settlements)); if (target) { goblin.path = pathTo(context.seed, goblin, target, context.settlements, false); goblin.pathIndex = 0; } }

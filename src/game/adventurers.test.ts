@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { advanceAdventurer, findTravelRoute, sampleAdventurer, type Adventurer, type TravelTopology } from './adventurers';
+import { findTravelRoute, type TravelTopology } from './adventurers';
+import { executePlan, type NpcPlan } from './npcPlanning';
 import type { RoadNode } from './roads';
 
 const node = (id: string, ownerId: string, x: number, kind: RoadNode['kind']): RoadNode => ({ id, ownerId, x, y: 0, kind, importance: 1 });
@@ -16,9 +17,9 @@ describe('adventurer travel simulation', () => {
     const route = findTravelRoute(topology(), 'a'); expect(route?.destinationSettlementId).toBe('b'); expect(route?.length).toBe(20); expect(route?.points).toEqual([{ x: 0, y: 0 }, { x: 10, y: 0 }, { x: 20, y: 0 }]);
   });
 
-  it('keeps constant speed between coarse updates and arrives exactly', () => {
-    const route = findTravelRoute(topology(), 'a')!; const adventurer: Adventurer = { id: 'test', homeSettlementId: 'a', state: 'travelling', currentSettlementId: null, route, routeDistance: 0, speed: 3, idleUntil: 0, lastSimTime: 0, journeyIndex: 0, lod: 'live', tickPhase: 0 };
-    advanceAdventurer(adventurer, topology(), 1); expect(adventurer.routeDistance).toBeCloseTo(3); expect(sampleAdventurer(adventurer, 1.5)?.x).toBeCloseTo(4.5);
-    advanceAdventurer(adventurer, topology(), 10); expect(adventurer.state).toBe('idle'); expect(adventurer.currentSettlementId).toBe('b'); expect(adventurer.route).toBeNull();
+  it('executes every planned waypoint without assigning the destination position', () => {
+    const agent = { x: 0, y: 0, previousX: 0, previousY: 0, speed: 3 }; const plan: NpcPlan = { goal: 'visit', steps: [{ kind: 'move', label: 'road', points: [{ x: 10, y: 0 }, { x: 20, y: 0 }] }], stepIndex: 0, pointIndex: 0 };
+    expect(executePlan(agent, plan, 1, 1)).toMatchObject({ complete: false }); expect(agent.x).toBeCloseTo(3);
+    expect(executePlan(agent, plan, 10, 11)).toMatchObject({ complete: true }); expect(agent.x).toBe(20); expect(agent.previousX).toBeCloseTo(3);
   });
 });
