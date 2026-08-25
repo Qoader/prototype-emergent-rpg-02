@@ -22,6 +22,8 @@ export type Landmark = 'tree' | 'ruin' | 'shrine' | null;
 export interface Tile { x: number; y: number; terrain: Terrain; biome: Biome; hydrology: Hydrology; elevation: number; movementCost: number; landmark: Landmark; walkable: boolean; road: boolean; port: boolean; waterRoute: boolean; }
 export interface WorldConfig { seed: string; version: number; }
 export interface WorldCoordinate { x: number; y: number; }
+/** The world-space tile at the top-left of logical chunk (0,0). */
+export type ChunkGridOrigin = WorldCoordinate;
 export interface ChunkCoordinate { cx: number; cy: number; }
 export interface RegionCoordinate { rx: number; ry: number; }
 export interface ChunkKey extends ChunkCoordinate { seed: string; version: number; }
@@ -62,14 +64,23 @@ function assertSupportedGeneratorVersion(config: WorldConfig) {
   if (!(SUPPORTED_GENERATOR_VERSIONS as readonly number[]).includes(config.version)) throw new Error(`Unsupported world generator version: ${config.version}`);
 }
 
-export function worldToChunk(x: number, y: number): ChunkCoordinate {
+export function chunkGridOrigin(config: WorldConfig): ChunkGridOrigin {
+  const start = findStartingPosition(config);
+  return { x: start.x - CHUNK_SIZE / 2, y: start.y - CHUNK_SIZE / 2 };
+}
+
+export function chunkBounds(cx: number, cy: number, origin: ChunkGridOrigin = { x: 0, y: 0 }) {
+  const minX = origin.x + cx * CHUNK_SIZE; const minY = origin.y + cy * CHUNK_SIZE;
+  return { minX, minY, maxX: minX + CHUNK_SIZE - 1, maxY: minY + CHUNK_SIZE - 1 };
+}
+
+export function worldToChunk(x: number, y: number, origin: ChunkGridOrigin = { x: 0, y: 0 }): ChunkCoordinate {
   assertInteger(x, 'x'); assertInteger(y, 'y');
-  return { cx: floorDiv(x, CHUNK_SIZE), cy: floorDiv(y, CHUNK_SIZE) };
+  return { cx: floorDiv(x - origin.x, CHUNK_SIZE), cy: floorDiv(y - origin.y, CHUNK_SIZE) };
 }
 
 export function worldToRegion(x: number, y: number): RegionCoordinate {
-  const chunk = worldToChunk(x, y);
-  return { rx: floorDiv(chunk.cx, REGION_CHUNK_SIZE), ry: floorDiv(chunk.cy, REGION_CHUNK_SIZE) };
+  return { rx: floorDiv(x, CHUNK_SIZE * REGION_CHUNK_SIZE), ry: floorDiv(y, CHUNK_SIZE * REGION_CHUNK_SIZE) };
 }
 
 export function chunkKey(key: ChunkKey) { return `${key.seed}:v${key.version}:chunk:${key.cx},${key.cy}`; }
@@ -142,11 +153,12 @@ export function classifyBiome(fields: ReturnType<typeof fieldsAt>, terrain: Terr
   return 'grassland';
 }
 
-export function chunkAt(config: WorldConfig, cx: number, cy: number): TerrainChunk {
+export function chunkAt(config: WorldConfig, cx: number, cy: number, origin: ChunkGridOrigin = { x: 0, y: 0 }): TerrainChunk {
   assertInteger(cx, 'cx'); assertInteger(cy, 'cy');
+  const bounds = chunkBounds(cx, cy, origin);
   const tiles: Tile[] = [];
   for (let y = 0; y < CHUNK_SIZE; y++) for (let x = 0; x < CHUNK_SIZE; x++) {
-    const worldX = cx * CHUNK_SIZE + x; const worldY = cy * CHUNK_SIZE + y; const fields = fieldsAt(config, worldX, worldY); const hydrology = hydrologyAt(config, worldX, worldY); tiles.push(tileFromFields(config, worldX, worldY, fields, hydrology));
+    const worldX = bounds.minX + x; const worldY = bounds.minY + y; const fields = fieldsAt(config, worldX, worldY); const hydrology = hydrologyAt(config, worldX, worldY); tiles.push(tileFromFields(config, worldX, worldY, fields, hydrology));
   }
   return { cx, cy, detail: 'terrain', tiles };
 }
@@ -185,7 +197,7 @@ export function findPath(seed: string, start: Tile, target: Tile, roadNetwork?: 
     return fromWater ? Boolean(portLinks.get(toKey)?.has(fromKey)) : Boolean(portLinks.get(fromKey)?.has(toKey));
   };
   const tileCache = new Map<string, Tile>(); const getTile = (x: number, y: number) => { const tileKey = key(x, y); const cached = tileCache.get(tileKey); if (cached) return cached; const tile = tileAt(seed, x, y); tileCache.set(tileKey, tile); return tile; };
-  const startChunk = worldToChunk(start.x, start.y); const minX = (startChunk.cx - 1) * CHUNK_SIZE; const minY = (startChunk.cy - 1) * CHUNK_SIZE; const maxX = (startChunk.cx + 2) * CHUNK_SIZE - 1; const maxY = (startChunk.cy + 2) * CHUNK_SIZE - 1;
+  const gridOrigin = chunkGridOrigin(createWorldConfig(seed)); const startChunk = worldToChunk(start.x, start.y, gridOrigin); const localBounds = chunkBounds(startChunk.cx - 1, startChunk.cy - 1, gridOrigin); const minX = localBounds.minX; const minY = localBounds.minY; const maxX = localBounds.maxX + CHUNK_SIZE * 2; const maxY = localBounds.maxY + CHUNK_SIZE * 2;
   const boundedTarget = { x: Math.max(minX, Math.min(maxX, target.x)), y: Math.max(minY, Math.min(maxY, target.y)) };
   const targetKey = key(boundedTarget.x, boundedTarget.y); const effectiveTarget = target.x === boundedTarget.x && target.y === boundedTarget.y ? target : getTile(boundedTarget.x, boundedTarget.y); const targetBlocked = !traversable(effectiveTarget, targetKey); const targetIsUnservedWater = !waterRouteTiles.has(targetKey) && (effectiveTarget.hydrology.waterBody === 'ocean' || effectiveTarget.hydrology.waterBody === 'lake');
   let searchTarget = boundedTarget;

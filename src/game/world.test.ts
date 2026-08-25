@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { CHUNK_SIZE, GENERATOR_VERSION, REGION_CHUNK_SIZE, STARTER_RADIUS, chunkAt, chunkKey, createWorldConfig, featureId, findPath, findStartingPosition, random, regionKey, tileAt, tileAtConfig, worldToChunk, worldToRegion } from './world';
+import { CHUNK_SIZE, GENERATOR_VERSION, REGION_CHUNK_SIZE, STARTER_RADIUS, chunkAt, chunkBounds, chunkGridOrigin, chunkKey, createWorldConfig, featureId, findPath, findStartingPosition, random, regionKey, tileAt, tileAtConfig, worldToChunk, worldToRegion } from './world';
 describe('procedural Emberwild', () => {
   it('selects a deterministic land starting zone', () => {
     for (const seed of ['EMBERWILD-01', 'OTHER', 'PHASE7']) {
@@ -41,6 +41,19 @@ describe('procedural Emberwild', () => {
     expect(worldToChunk(-1, -CHUNK_SIZE)).toEqual({ cx: -1, cy: -1 });
     expect(worldToChunk(-CHUNK_SIZE - 1, -1)).toEqual({ cx: -2, cy: -1 });
     expect(worldToRegion(-1, -REGION_CHUNK_SIZE * CHUNK_SIZE)).toEqual({ rx: -1, ry: -1 });
+  });
+  it('centers the deterministic spawn in logical chunk zero without moving region boundaries', () => {
+    for (const seed of ['EMBERWILD-01', 'OTHER', 'PHASE7']) {
+      const config = createWorldConfig(seed); const start = findStartingPosition(config); const origin = chunkGridOrigin(config); const bounds = chunkBounds(0, 0, origin);
+      expect(worldToChunk(start.x, start.y, origin)).toEqual({ cx: 0, cy: 0 });
+      expect(start.x - bounds.minX).toBe(CHUNK_SIZE / 2); expect(start.y - bounds.minY).toBe(CHUNK_SIZE / 2);
+      expect(worldToRegion(start.x, start.y)).toEqual({ rx: Math.floor(start.x / (CHUNK_SIZE * REGION_CHUNK_SIZE)), ry: Math.floor(start.y / (CHUNK_SIZE * REGION_CHUNK_SIZE)) });
+    }
+  });
+  it('generates shifted chunk terrain at its logical world bounds', () => {
+    const config = createWorldConfig('EMBERWILD-01'); const origin = chunkGridOrigin(config); const bounds = chunkBounds(0, 0, origin); const chunk = chunkAt(config, 0, 0, origin);
+    expect(chunk.tiles[0]).toMatchObject({ x: bounds.minX, y: bounds.minY });
+    expect(chunk.tiles.at(-1)).toMatchObject({ x: bounds.maxX, y: bounds.maxY });
   });
   it('creates versioned stable chunk, region, and feature identities', () => {
     const config = createWorldConfig('EMBERWILD-01');
