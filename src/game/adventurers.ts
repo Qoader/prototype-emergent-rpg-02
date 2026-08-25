@@ -4,7 +4,7 @@ import type { WorldPoint } from './settlements';
 
 export interface TravelTopology { settlements: SettlementShell[]; roadLinks: TravelRoadLink[]; }
 export interface TravelRoute { destinationSettlementId: string; points: WorldPoint[]; cumulative: number[]; length: number; width: number; }
-export type AdventurerState = 'idle' | 'travelling' | 'exploring';
+export type AdventurerState = 'idle' | 'travelling' | 'exploring' | 'fighting';
 export type AdventurerLod = 'live' | 'coarse' | 'sparse' | 'sleeping';
 export interface Adventurer { id: string; homeSettlementId: string; state: AdventurerState; currentSettlementId: string | null; route: TravelRoute | null; routeDistance: number; speed: number; idleUntil: number; lastSimTime: number; journeyIndex: number; lod: AdventurerLod; tickPhase: number; }
 export interface SampledAdventurer { x: number; y: number; rotation: number; state: AdventurerState; width: number; }
@@ -59,6 +59,7 @@ export function createAdventurer(settlement: SettlementShell, gameTime = 0): Adv
 }
 
 export function advanceAdventurer(adventurer: Adventurer, topology: TravelTopology, gameTime: number, previousDestinationId?: string) {
+  if (adventurer.state === 'fighting') { adventurer.lastSimTime = gameTime; return; }
   if (gameTime <= adventurer.lastSimTime) return;
   let remaining = gameTime - adventurer.lastSimTime; let guard = 0;
   while (remaining > 0 && guard++ < 128) {
@@ -80,7 +81,7 @@ export function advanceAdventurer(adventurer: Adventurer, topology: TravelTopolo
 }
 
 export function sampleAdventurer(adventurer: Adventurer, gameTime: number): SampledAdventurer | null {
-  if (!adventurer.route || adventurer.state !== 'travelling') return null;
+  if (!adventurer.route || (adventurer.state !== 'travelling' && adventurer.state !== 'fighting')) return null;
   const progress = adventurer.routeDistance + Math.max(0, gameTime - adventurer.lastSimTime) * adventurer.speed; const point = pointAt(adventurer.route, progress);
   return { ...point, width: routeWidth(adventurer.route), state: adventurer.state };
 }
