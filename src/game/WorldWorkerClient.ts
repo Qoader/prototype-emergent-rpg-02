@@ -2,6 +2,7 @@ import type { WorldChunk, WorldConfig } from './world';
 import type { WorldProviderOptions } from './WorldProvider';
 import type { WorldWorkerResponse } from './worldWorkerProtocol';
 import type { NearbySettlementResult } from './regions';
+import type { TravelTopology } from './adventurers';
 
 interface Pending { resolve: (value: unknown) => void; reject: (error: Error) => void; }
 
@@ -27,11 +28,13 @@ export class WorldWorkerClient {
     if (message.type === 'error' && message.requestId === undefined) { this.fail(new Error(message.message)); return; }
     if (message.type === 'chunk') { const pending = this.pending.get(message.requestId); if (!pending) return; this.pending.delete(message.requestId); pending.resolve(message.chunk); }
     if (message.type === 'nearbySettlements') { const pending = this.pending.get(message.requestId); if (!pending) return; this.pending.delete(message.requestId); pending.resolve(message.result as unknown as WorldChunk); }
+    if (message.type === 'travelTopology') { const pending = this.pending.get(message.requestId); if (!pending) return; this.pending.delete(message.requestId); pending.resolve(message.result as unknown as TravelTopology); }
     if (message.type === 'error' && message.requestId !== undefined) { const pending = this.pending.get(message.requestId); if (pending) { this.pending.delete(message.requestId); pending.reject(new Error(message.message)); } }
   }
   private fail(error: Error) { if (this.closed) return; this.closed = true; clearTimeout(this.readyTimer); this.readyReject(error); for (const pending of this.pending.values()) pending.reject(error); this.pending.clear(); this.worker.terminate(); }
   getChunk(cx: number, cy: number) { const requestId = this.nextRequestId++; return this.ready.then(() => new Promise<WorldChunk>((resolve, reject) => { if (this.closed) { reject(new Error('World worker is unavailable')); return; } this.pending.set(requestId, { resolve: resolve as (value: unknown) => void, reject }); this.worker.postMessage({ type: 'getChunk', requestId, cx, cy }); })); }
   getNearbySettlements(x: number, y: number, radius = 1, limit = 5) { const requestId = this.nextRequestId++; return this.ready.then(() => new Promise<NearbySettlementResult>((resolve, reject) => { if (this.closed) { reject(new Error('World worker is unavailable')); return; } this.pending.set(requestId, { resolve: resolve as (value: unknown) => void, reject }); this.worker.postMessage({ type: 'getNearbySettlements', requestId, x, y, radius, limit }); })); }
+  getTravelTopology(gx: number, gy: number, radius = 1) { const requestId = this.nextRequestId++; return this.ready.then(() => new Promise<TravelTopology>((resolve, reject) => { if (this.closed) { reject(new Error('World worker is unavailable')); return; } this.pending.set(requestId, { resolve: resolve as (value: unknown) => void, reject }); this.worker.postMessage({ type: 'getTravelTopology', requestId, gx, gy, radius }); })); }
   whenReady() { return this.ready; }
   clear() { if (!this.closed) this.worker.postMessage({ type: 'clear' }); }
   dispose() { if (this.closed) return Promise.resolve(); this.closed = true; clearTimeout(this.readyTimer); for (const pending of this.pending.values()) pending.reject(new Error('World worker disposed')); this.pending.clear(); this.worker.postMessage({ type: 'dispose' }); this.worker.terminate(); return Promise.resolve(); }

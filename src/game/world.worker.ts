@@ -29,4 +29,10 @@ self.onmessage = (event: MessageEvent<WorldWorkerRequest>) => {
       if (!disposed) post({ type: 'nearbySettlements', requestId: message.requestId, result });
     }).catch((error) => post({ type: 'error', requestId: message.requestId, message: error instanceof Error ? error.message : String(error) }));
   }
+  if (message.type === 'getTravelTopology') {
+    if (disposed || !provider) { post({ type: 'error', requestId: message.requestId, message: 'World worker is not ready' }); return; }
+    void provider.getTravelTopology(message.gx, message.gy, message.radius).then((result) => {
+      if (!disposed) post({ type: 'travelTopology', requestId: message.requestId, result });
+    }).catch((error) => post({ type: 'error', requestId: message.requestId, message: error instanceof Error ? error.message : String(error) }));
+  }
 };

@@ -1,7 +1,8 @@
 import { chunkAt, CHUNK_SIZE, REGION_CHUNK_SIZE, regionKey, findStartingPosition, worldToRegion, type WorldChunk, type WorldConfig } from './world';
 import { featureIntersectsBounds, generateRegion, type LandmarkAnchor, type NearbySettlementResult, type RegionData, type ResourceAnchor, type RoadEndpoint, type SettlementShell } from './regions';
 import { generateSettlementLayout, layoutIntersectsBounds, settlementLayoutBounds, type SettlementLayout } from './settlements';
-import { generateRoadCell, generateStarterRoad, roadSegmentIntersectsBounds, ROAD_NETWORK_VERSION, roadGraphCell, starterClaimsForCell, type RoadNetwork, type RoadSegment } from './roads';
+import { generateRoadCell, generateStarterRoad, roadSegmentIntersectsBounds, ROAD_NETWORK_VERSION, roadGraphCell, starterClaimsForCell, travelRoadLinks, type RoadNetwork, type RoadSegment } from './roads';
+import type { TravelTopology } from './adventurers';
 import { LruCache } from './LruCache';
 
 export interface WorldProviderOptions { chunkCapacity?: number; regionCapacity?: number; roadCapacity?: number; layoutCapacity?: number; }
@@ -37,6 +38,26 @@ export class WorldProvider {
     const cellGenerated = Promise.resolve(this.roadCells.get(cellKey) ?? this.inFlightRoadCells.get(cellKey) ?? Promise.all([regionSource, starterSource]).then(([regions, starterRoad]) => generateRoadCell(this.config, regions, cell.gx, cell.gy, starterClaimsForCell(starterRoad, cell.gx, cell.gy)).segments).then((segments) => { this.roadCells.set(cellKey, segments); return segments; }).finally(() => this.inFlightRoadCells.delete(cellKey)));
     if (!this.roadCells.get(cellKey) && !this.inFlightRoadCells.has(cellKey)) this.inFlightRoadCells.set(cellKey, cellGenerated);
     const request = Promise.resolve(cellGenerated).then((segments) => { const network = { key: { rx, ry }, nodes: [], segments: segments.filter((segment) => segment.ownerRegion.rx === rx && segment.ownerRegion.ry === ry) }; this.roads.set(key, network); return network; }).finally(() => this.inFlightRoads.delete(key)); this.inFlightRoads.set(key, request); return request;
+  }
+
+  private getRoadCell(gx: number, gy: number): Promise<RoadSegment[]> {
+    const cellKey = `${this.config.seed}:v${this.config.version}:roads-cell:${gx},${gy}`;
+    const cached = this.roadCells.get(cellKey); if (cached) return Promise.resolve(cached);
+    const existing = this.inFlightRoadCells.get(cellKey); if (existing) return existing;
+    const coordinates: Array<{ rx: number; ry: number }> = [];
+    for (let y = gy * 4; y < gy * 4 + 4; y++) for (let x = gx * 4; x < gx * 4 + 4; x++) coordinates.push({ rx: x, ry: y });
+    const request = Promise.all(coordinates.map(({ rx, ry }) => this.getRegion(rx, ry))).then((regions) => this.getStarterRoad().then((starter) => generateRoadCell(this.config, regions, gx, gy, starterClaimsForCell(starter, gx, gy)).segments)).then((segments) => { this.roadCells.set(cellKey, segments); return segments; }).finally(() => this.inFlightRoadCells.delete(cellKey));
+    this.inFlightRoadCells.set(cellKey, request); return request;
+  }
+
+  async getTravelTopology(gx: number, gy: number, radius = 1): Promise<TravelTopology> {
+    const cells: Array<{ gx: number; gy: number }> = [];
+    for (let y = gy - radius; y <= gy + radius; y++) for (let x = gx - radius; x <= gx + radius; x++) cells.push({ gx: x, gy: y });
+    const segments = (await Promise.all(cells.map((cell) => this.getRoadCell(cell.gx, cell.gy)))).flat();
+    const regions = (await Promise.all(cells.flatMap((cell) => { const result: Array<{ rx: number; ry: number }> = []; for (let y = cell.gy * 4; y < cell.gy * 4 + 4; y++) for (let x = cell.gx * 4; x < cell.gx * 4 + 4; x++) result.push({ rx: x, ry: y }); return result; }))).flat();
+    const uniqueRegions = [...new Map(regions.map((region) => [`${region.rx},${region.ry}`, region])).values()];
+    const settlementData = (await Promise.all(uniqueRegions.map((region) => this.getRegion(region.rx, region.ry)))).flatMap((region) => region.settlements);
+    return { settlements: uniqueById(settlementData), roadLinks: travelRoadLinks([...new Map(segments.map((segment) => [segment.id, segment])).values()]) };
   }
 
   getRegion(rx: number, ry: number): Promise<RegionData> {

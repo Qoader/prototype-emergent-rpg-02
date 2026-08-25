@@ -21,6 +21,34 @@ export interface Port { id: string; roadId: string; x: number; y: number; waterT
 export interface WaterRoute { id: string; roadId: string; tiles: WorldCoordinate[]; points: WorldPoint[]; width: number; ports: Port[]; }
 export interface RoadSegment { id: string; parentId: string; ownerRegion: RegionCoordinate; from: RoadNode; to: RoadNode; importance: RoadImportance; width: number; tiles: WorldCoordinate[]; points: WorldPoint[]; bridges: Bridge[]; waterRoutes: WaterRoute[]; ports: Port[]; }
 export interface RoadNetwork { key: RegionCoordinate; nodes: RoadNode[]; segments: RoadSegment[]; }
+export interface TravelRoadLink { id: string; from: RoadNode; to: RoadNode; points: WorldPoint[]; length: number; width: number; }
+
+function polylineLength(points: WorldPoint[]) { let length = 0; for (let index = 1; index < points.length; index++) length += Math.hypot(points[index].x - points[index - 1].x, points[index].y - points[index - 1].y); return length; }
+
+/** Joins region-clipped road pieces back into complete traveller routes. */
+export function travelRoadLinks(segments: RoadSegment[]): TravelRoadLink[] {
+  const grouped = new Map<string, RoadSegment[]>();
+  for (const segment of segments) { const group = grouped.get(segment.parentId) ?? []; group.push(segment); grouped.set(segment.parentId, group); }
+  const links: TravelRoadLink[] = [];
+  for (const [id, pieces] of grouped) {
+    const first = pieces[0]; if (!first) continue;
+    const remaining = pieces.slice(); const points: WorldPoint[] = []; let cursor = first.from;
+    while (remaining.length) {
+      let selected = 0; let reverse = false; let best = Infinity;
+      for (let index = 0; index < remaining.length; index++) {
+        const piece = remaining[index]; const start = piece.points[0]; const end = piece.points.at(-1)!;
+        const startDistance = Math.hypot(start.x - cursor.x, start.y - cursor.y); const endDistance = Math.hypot(end.x - cursor.x, end.y - cursor.y);
+        if (startDistance < best) { best = startDistance; selected = index; reverse = false; }
+        if (endDistance < best) { best = endDistance; selected = index; reverse = true; }
+      }
+      const piece = remaining.splice(selected, 1)[0]; const ordered = reverse ? piece.points.slice().reverse() : piece.points;
+      for (const point of ordered) if (!points.length || point.x !== points.at(-1)!.x || point.y !== points.at(-1)!.y) points.push(point);
+      cursor = reverse ? piece.from : piece.to;
+    }
+    if (points.length > 1) links.push({ id, from: first.from, to: first.to, points, length: polylineLength(points), width: first.width });
+  }
+  return links.sort((a, b) => a.id.localeCompare(b.id));
+}
 
 function regionKey(region: RegionCoordinate) { return `${region.rx},${region.ry}`; }
 function graphCell(rx: number, ry: number) { return { gx: Math.floor(rx / ROAD_GRAPH_REGION_SIZE), gy: Math.floor(ry / ROAD_GRAPH_REGION_SIZE) }; }

@@ -1,0 +1,24 @@
+import { describe, expect, it } from 'vitest';
+import { advanceAdventurer, findTravelRoute, sampleAdventurer, type Adventurer, type TravelTopology } from './adventurers';
+import type { RoadNode } from './roads';
+
+const node = (id: string, ownerId: string, x: number, kind: RoadNode['kind']): RoadNode => ({ id, ownerId, x, y: 0, kind, importance: 1 });
+const topology = (): TravelTopology => {
+  const a = node('a-gate', 'a', 0, 'settlement-gate'); const portal = node('portal', 'portal', 10, 'region-border'); const b = node('b-gate', 'b', 20, 'settlement-gate');
+  return { settlements: [{ id: 'a', name: 'A', x: 0, y: 0, type: 'village', radius: 1, populationClass: 1, footprint: { width: 1, height: 1, rotation: 0 }, anchors: [], accessPoints: [] }, { id: 'b', name: 'B', x: 20, y: 0, type: 'village', radius: 1, populationClass: 1, footprint: { width: 1, height: 1, rotation: 0 }, anchors: [], accessPoints: [] }], roadLinks: [
+    { id: 'a-portal', from: a, to: portal, points: [{ x: 0, y: 0 }, { x: 10, y: 0 }], length: 10, width: 1 },
+    { id: 'portal-b', from: portal, to: b, points: [{ x: 10, y: 0 }, { x: 20, y: 0 }], length: 10, width: 1 },
+  ] };
+};
+
+describe('adventurer travel simulation', () => {
+  it('joins portal-connected road links into one settlement route', () => {
+    const route = findTravelRoute(topology(), 'a'); expect(route?.destinationSettlementId).toBe('b'); expect(route?.length).toBe(20); expect(route?.points).toEqual([{ x: 0, y: 0 }, { x: 10, y: 0 }, { x: 20, y: 0 }]);
+  });
+
+  it('keeps constant speed between coarse updates and arrives exactly', () => {
+    const route = findTravelRoute(topology(), 'a')!; const adventurer: Adventurer = { id: 'test', homeSettlementId: 'a', state: 'travelling', currentSettlementId: null, route, routeDistance: 0, speed: 3, idleUntil: 0, lastSimTime: 0, journeyIndex: 0, lod: 'live', tickPhase: 0 };
+    advanceAdventurer(adventurer, topology(), 1); expect(adventurer.routeDistance).toBeCloseTo(3); expect(sampleAdventurer(adventurer, 1.5)?.x).toBeCloseTo(4.5);
+    advanceAdventurer(adventurer, topology(), 10); expect(adventurer.state).toBe('idle'); expect(adventurer.currentSettlementId).toBe('b'); expect(adventurer.route).toBeNull();
+  });
+});
