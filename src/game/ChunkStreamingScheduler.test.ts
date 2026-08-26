@@ -64,4 +64,17 @@ describe('ChunkStreamingScheduler', () => {
     await flushRequests();
     expect(load).toHaveBeenCalledTimes(2);
   });
+
+  it('retries a visible failure without waiting for another viewport plan', async () => {
+    const failed = vi.fn();
+    const load = vi.fn().mockRejectedValue(new Error('unavailable'));
+    const scheduler = new ChunkStreamingScheduler({ maxConcurrentRequests: 1, isLoaded: () => false, load, receive: vi.fn(), failed });
+
+    scheduler.setPlan(plan([request(0, 0)]));
+    await new Promise((resolve) => setTimeout(resolve, 300));
+
+    expect(failed).toHaveBeenCalledTimes(2);
+    expect(load).toHaveBeenCalledTimes(2);
+    scheduler.stop();
+  });
 });

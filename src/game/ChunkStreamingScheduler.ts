@@ -20,6 +20,8 @@ export class ChunkStreamingScheduler {
   private preload = new Set<string>();
   private stopped = false;
   private readonly maxConcurrentRequests: number;
+  private readonly retries = new Map<string, number>();
+  private readonly retryTimers = new Set<ReturnType<typeof setTimeout>>();
 
   constructor(private readonly options: ChunkStreamingSchedulerOptions) {
     this.maxConcurrentRequests = options.maxConcurrentRequests ?? 1;
@@ -29,6 +31,7 @@ export class ChunkStreamingScheduler {
     if (this.stopped) return;
     this.desired = plan.visible;
     this.preload = plan.preload;
+    for (const chunkKey of this.retries.keys()) if (!this.desired.has(chunkKey)) this.retries.delete(chunkKey);
     this.queue = plan.requests.filter((request) => {
       const chunkKey = key(request.cx, request.cy);
       return !this.active.has(chunkKey) && !this.options.isLoaded(chunkKey);
@@ -41,6 +44,8 @@ export class ChunkStreamingScheduler {
     this.queue = [];
     this.desired.clear();
     this.preload.clear();
+    for (const timer of this.retryTimers) clearTimeout(timer);
+    this.retryTimers.clear();
   }
 
   private pump() {
@@ -54,14 +59,28 @@ export class ChunkStreamingScheduler {
           if (this.stopped) return;
           if (this.desired.has(chunkKey)) this.options.receive(chunk, false);
           else if (this.preload.has(chunkKey)) this.options.receive(chunk, true);
+          this.retries.delete(chunkKey);
         })
         .catch(() => {
-          if (!this.stopped && this.desired.has(chunkKey)) this.options.failed(request);
+          if (!this.stopped && this.desired.has(chunkKey)) { this.options.failed(request); this.retry(request, chunkKey); }
         })
         .finally(() => {
           this.active.delete(chunkKey);
           this.pump();
         });
     }
+  }
+
+  private retry(request: StreamRequest, chunkKey: string) {
+    const attempts = (this.retries.get(chunkKey) ?? 0) + 1;
+    if (attempts > 3) return;
+    this.retries.set(chunkKey, attempts);
+    const timer = setTimeout(() => {
+      this.retryTimers.delete(timer);
+      if (this.stopped || !this.desired.has(chunkKey) || this.active.has(chunkKey) || this.options.isLoaded(chunkKey)) return;
+      this.queue = [request, ...this.queue.filter((queued) => key(queued.cx, queued.cy) !== chunkKey)];
+      this.pump();
+    }, 250 * attempts);
+    this.retryTimers.add(timer);
   }
 }
