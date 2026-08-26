@@ -22,7 +22,7 @@ export class ChunkStreamingScheduler {
   private readonly maxConcurrentRequests: number;
 
   constructor(private readonly options: ChunkStreamingSchedulerOptions) {
-    this.maxConcurrentRequests = options.maxConcurrentRequests ?? 2;
+    this.maxConcurrentRequests = options.maxConcurrentRequests ?? 1;
   }
 
   setPlan(plan: StreamingPlan) {

@@ -3,8 +3,8 @@
 export const TILE_SIZE = 40;
 export const CHUNK_SIZE = 24;
 export const REGION_CHUNK_SIZE = 16;
-export const GENERATOR_VERSION = 10;
-export const SUPPORTED_GENERATOR_VERSIONS = [6, 7, 8, 9, GENERATOR_VERSION] as const;
+export const GENERATOR_VERSION = 11;
+export const SUPPORTED_GENERATOR_VERSIONS = [6, 7, 8, 9, 10, GENERATOR_VERSION] as const;
 export const TREE_LANDMARK_THRESHOLD = 0.84;
 export const STARTER_RADIUS = 2;
 const START_SEARCH_RADIUS = 96;

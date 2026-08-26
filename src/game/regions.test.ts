@@ -85,4 +85,16 @@ describe('region-level feature planning', () => {
     provider.clear();
     expect(await provider.getChunk(-2, -2)).toEqual(before);
   }, 30000);
+
+  it('keeps isolated v11 cold chunk generation within the one-second p95 budget', async () => {
+    const samples: number[] = [];
+    const coordinates = [[0, 0], [1, 0], [-1, 1], [2, -2], [-2, -2], [3, 1], [0, 3], [-3, 0], [4, -1], [-1, 4], [2, 2], [-4, -3]] as const;
+    for (const [cx, cy] of coordinates) {
+      const provider = new WorldProvider(createWorldConfig(`COLD-${cx},${cy}`), { regionCapacity: 16, chunkCapacity: 4 });
+      const started = performance.now(); const chunk = await provider.getChunk(cx, cy); samples.push(performance.now() - started);
+      expect(chunk.detail).toBe('full'); provider.clear();
+    }
+    samples.sort((a, b) => a - b);
+    expect(samples[Math.floor(samples.length * .95)]).toBeLessThan(1000);
+  }, 30000);
 });

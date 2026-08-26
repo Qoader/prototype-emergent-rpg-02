@@ -29,7 +29,7 @@ describe('procedural Emberwild', () => {
   });
   it('provides deterministic namespaced random access', () => {
     const config = createWorldConfig('EMBERWILD-01');
-    expect(random(config, 'settlement', 12, -4)).toBe(0.47035506507381797);
+    expect(random(config, 'settlement', 12, -4)).toBe(0.09937691362574697);
     expect(random(config, 'settlement', 12, -4)).toBe(random(config, 'settlement', 12, -4));
     expect(random(config, 'settlement', 12, -4)).not.toBe(random(config, 'road', 12, -4));
     expect(random(config, 'settlement', 12, -4)).not.toBe(random(createWorldConfig('OTHER'), 'settlement', 12, -4));
@@ -57,9 +57,9 @@ describe('procedural Emberwild', () => {
   });
   it('creates versioned stable chunk, region, and feature identities', () => {
     const config = createWorldConfig('EMBERWILD-01');
-    expect(chunkKey({ ...config, cx: 2, cy: -3 })).toBe('EMBERWILD-01:v10:chunk:2,-3');
-    expect(regionKey({ ...config, rx: -2, ry: 3 })).toBe('EMBERWILD-01:v10:region:-2,3');
-    expect(featureId(config, 'settlement', 12, -4)).toBe('EMBERWILD-01:v10:settlement:12,-4');
+    expect(chunkKey({ ...config, cx: 2, cy: -3 })).toBe('EMBERWILD-01:v11:chunk:2,-3');
+    expect(regionKey({ ...config, rx: -2, ry: 3 })).toBe('EMBERWILD-01:v11:region:-2,3');
+    expect(featureId(config, 'settlement', 12, -4)).toBe('EMBERWILD-01:v11:settlement:12,-4');
   });
   it('regenerates identical chunk data regardless of request order', () => {
     const config = createWorldConfig('EMBERWILD-01');
@@ -93,7 +93,7 @@ describe('procedural Emberwild', () => {
     expect(path.at(-1)).not.toMatchObject(start);
   });
   it('can select an impassable destination when it is marked as a road', () => {
-    const seed = 'EMBERWILD-01'; const start = findStartingPosition(createWorldConfig(seed)); const blocked = { ...tileAt(seed, start.x + 1, start.y), walkable: false };
+    const seed = 'EMBERWILD-01'; const start = findStartingPosition(createWorldConfig(seed)); const blocked = { ...tileAt(seed, start.x + 1, start.y), hydrology: { ...tileAt(seed, start.x + 1, start.y).hydrology, waterBody: 'none' as const }, walkable: false };
     const ordinaryPath = findPath(seed, tileAt(seed, start.x, start.y), blocked);
     const roadPath = findPath(seed, tileAt(seed, start.x, start.y), blocked, undefined, { roadTileKeys: new Set([`${blocked.x},${blocked.y}`]) });
     expect(ordinaryPath.at(-1)).not.toMatchObject({ x: blocked.x, y: blocked.y });

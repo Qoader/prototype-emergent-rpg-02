@@ -2,6 +2,9 @@ import type { WorldProviderOptions } from './WorldProvider';
 import type { TerrainChunk, WorldChunk, WorldConfig } from './world';
 import type { NearbySettlementResult } from './regions';
 import type { TravelTopology } from './adventurers';
+import type { ChunkRenderPayload } from './chunkRenderPayload';
+
+export interface ChunkCoordinateRequest { cx: number; cy: number; }
 
 export type WorldWorkerRequest =
   | { type: 'init'; config: WorldConfig; options?: WorldProviderOptions }
@@ -9,6 +12,8 @@ export type WorldWorkerRequest =
   | { type: 'getChunk'; requestId: number; cx: number; cy: number }
   | { type: 'getNearbySettlements'; requestId: number; x: number; y: number; radius: number; limit: number }
   | { type: 'getTravelTopology'; requestId: number; gx: number; gy: number; radius: number }
+  | { type: 'requestChunks'; requestId: number; priority: 'visible' | 'preload'; chunks: ChunkCoordinateRequest[] }
+  | { type: 'cancel'; requestIds: number[] }
   | { type: 'clear' }
   | { type: 'dispose' };
 
@@ -18,5 +23,6 @@ export type WorldWorkerResponse =
   | { type: 'chunk'; requestId: number; chunk: WorldChunk; elapsedMs: number }
   | { type: 'nearbySettlements'; requestId: number; result: NearbySettlementResult }
   | { type: 'travelTopology'; requestId: number; result: TravelTopology }
+  | { type: 'chunkPayloads'; requestId: number; payloads: ChunkRenderPayload[]; timings: Record<string, number>; transferBytes: number }
   | { type: 'error'; requestId?: number; message: string }
   | { type: 'disposed' };
